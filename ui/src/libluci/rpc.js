@@ -1,7 +1,3 @@
-'use strict';
-'require baseclass';
-'require request';
-
 var rpcRequestID = 1,
     rpcSessionID = L.env.sessionid || '00000000000000000000000000000000',
     rpcBaseURL = L.url('admin/ubus'),

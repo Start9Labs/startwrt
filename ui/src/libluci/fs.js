@@ -1,7 +1,4 @@
-'use strict';
-'require rpc';
-'require request';
-'require baseclass';
+import "./rpc" // 'require rpc';
 
 /**
  * @typedef {Object} FileStatEntry

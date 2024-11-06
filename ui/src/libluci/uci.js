@@ -1,6 +1,4 @@
-'use strict';
-'require rpc';
-'require baseclass';
+import "./rpc"; // 'require rpc';
 
 function isEmpty(object, ignore) {
 	for (var property in object)
@@ -21,8 +19,8 @@ function isEmpty(object, ignore) {
  * manipulation layer on top to allow for synchroneous operations on
  * UCI configuration data.
  */
-return baseclass.extend(/** @lends LuCI.uci.prototype */ {
-	__init__: function() {
+uci = new class Uci {
+	new() {
 		this.state = {
 			newidx:  0,
 			values:  { },
@@ -33,57 +31,57 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 		};
 
 		this.loaded = {};
-	},
+	}
 
-	callLoad: rpc.declare({
+	callLoad = rpc.declare({
 		object: 'uci',
 		method: 'get',
 		params: [ 'config' ],
 		expect: { values: { } },
 		reject: true
-	}),
+	})
 
-	callOrder: rpc.declare({
+	callOrder = rpc.declare({
 		object: 'uci',
 		method: 'order',
 		params: [ 'config', 'sections' ],
 		reject: true
-	}),
+	})
 
-	callAdd: rpc.declare({
+	callAdd = rpc.declare({
 		object: 'uci',
 		method: 'add',
 		params: [ 'config', 'type', 'name', 'values' ],
 		expect: { section: '' },
 		reject: true
-	}),
+	})
 
-	callSet: rpc.declare({
+	callSet = rpc.declare({
 		object: 'uci',
 		method: 'set',
 		params: [ 'config', 'section', 'values' ],
 		reject: true
-	}),
+	})
 
-	callDelete: rpc.declare({
+	callDelete = rpc.declare({
 		object: 'uci',
 		method: 'delete',
 		params: [ 'config', 'section', 'options' ],
 		reject: true
-	}),
+	})
 
-	callApply: rpc.declare({
+	callApply = rpc.declare({
 		object: 'uci',
 		method: 'apply',
 		params: [ 'timeout', 'rollback' ],
 		reject: true
-	}),
+	})
 
-	callConfirm: rpc.declare({
+	callConfirm = rpc.declare({
 		object: 'uci',
 		method: 'confirm',
 		reject: true
-	}),
+	})
 
 
 	/**
@@ -100,7 +98,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 	 * A newly generated, unique section ID in the form `newXXXXXX`
 	 * where `X` denotes a hexadecimal digit.
 	 */
-	createSID: function(conf) {
+	createSID(conf) {
 		var v = this.state.values,
 		    n = this.state.creates,
 		    sid;
@@ -110,7 +108,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 		} while ((n[conf] && n[conf][sid]) || (v[conf] && v[conf][sid]));
 
 		return sid;
-	},
+	}
 
 	/**
 	 * Resolves a given section ID in extended notation to the internal
@@ -131,7 +129,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 	 * not in extended notation. Returns `null` when an extended ID could
 	 * not be resolved to existing section ID.
 	 */
-	resolveSID: function(conf, sid) {
+	resolveSID(conf, sid) {
 		if (typeof(sid) != 'string')
 			return sid;
 
@@ -147,10 +145,10 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 		}
 
 		return sid;
-	},
+	}
 
 	/* private */
-	reorderSections: function() {
+	reorderSections() {
 		var v = this.state.values,
 		    n = this.state.creates,
 		    r = this.state.reorder,
@@ -189,15 +187,15 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 
 		this.state.reorder = { };
 		return Promise.all(tasks);
-	},
+	}
 
 	/* private */
-	loadPackage: function(packageName) {
+	loadPackage(packageName) {
 		if (this.loaded[packageName] == null)
 			return (this.loaded[packageName] = this.callLoad(packageName));
 
 		return Promise.resolve(this.loaded[packageName]);
-	},
+	}
 
 	/**
 	 * Loads the given UCI configurations from the remote `ubus` api.
@@ -217,7 +215,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 	 * Returns a promise resolving to the names of the configurations
 	 * that have been successfully loaded.
 	 */
-	load: function(packages) {
+	load(packages) {
 		var self = this,
 		    pkgs = [ ],
 		    tasks = [];
@@ -240,7 +238,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 
 			return pkgs;
 		});
-	},
+	}
 
 	/**
 	 * Unloads the given UCI configurations from the local cache.
@@ -249,7 +247,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 	 * The name of the configuration or an array of configuration
 	 * names to unload.
 	 */
-	unload: function(packages) {
+	unload(packages) {
 		if (!Array.isArray(packages))
 			packages = [ packages ];
 
@@ -261,7 +259,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 
 			delete this.loaded[packages[i]];
 		}
-	},
+	}
 
 	/**
 	 * Adds a new section of the given type to the given configuration,
@@ -281,7 +279,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 	 * Returns the section ID of the newly added section which is equivalent
 	 * to the given name for non-anonymous sections.
 	 */
-	add: function(conf, type, name) {
+	add(conf, type, name) {
 		var n = this.state.creates,
 		    sid = name || this.createSID(conf);
 
@@ -297,7 +295,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 		};
 
 		return sid;
-	},
+	}
 
 	/**
 	 * Removes the section with the given ID from the given configuration.
@@ -308,7 +306,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 	 * @param {string} sid
 	 * The ID of the section to remove.
 	 */
-	remove: function(conf, sid) {
+	remove(conf, sid) {
 		var v = this.state.values,
 		    n = this.state.creates,
 		    c = this.state.changes,
@@ -327,7 +325,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 
 			d[conf][sid] = true;
 		}
-	},
+	}
 
 	/**
 	 * A section object represents the options and their corresponding values
@@ -397,7 +395,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 	 * Returns a sorted array of the section objects within the given
 	 * configuration, filtered by type of a type has been specified.
 	 */
-	sections: function(conf, type, cb) {
+	sections(conf, type, cb) {
 		var sa = [ ],
 		    v = this.state.values[conf],
 		    n = this.state.creates[conf],
@@ -429,7 +427,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 				cb.call(this, sa[i], sa[i]['.name']);
 
 		return sa;
-	},
+	}
 
 	/**
 	 * Gets the value of the given option within the specified section
@@ -456,7 +454,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 	 * - Returns `null` if the config, section or option has not been
 	 *   found or if the corresponding configuration is not loaded.
 	 */
-	get: function(conf, sid, opt) {
+	get(conf, sid, opt) {
 		var v = this.state.values,
 		    n = this.state.creates,
 		    c = this.state.changes,
@@ -521,7 +519,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 		}
 
 		return null;
-	},
+	}
 
 	/**
 	 * Sets the value of the given option within the specified section
@@ -544,7 +542,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 	 * the option will be removed, otherwise it will be set or overwritten
 	 * with the given value.
 	 */
-	set: function(conf, sid, opt, val) {
+	set(conf, sid, opt, val) {
 		var v = this.state.values,
 		    n = this.state.creates,
 		    c = this.state.changes,
@@ -607,7 +605,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 					d[conf][sid][opt] = true;
 			}
 		}
-	},
+	}
 
 	/**
 	 * Remove the given option within the specified section of the given
@@ -625,9 +623,9 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 	 * @param {string} option
 	 * The name of the option to remove.
 	 */
-	unset: function(conf, sid, opt) {
+	unset(conf, sid, opt) {
 		return this.set(conf, sid, opt, null);
-	},
+	}
 
 	/**
 	 * Gets the value of the given option or the entire section object of
@@ -656,7 +654,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 	 * - Returns `null` if the config, section or option has not been
 	 *   found or if the corresponding configuration is not loaded.
 	 */
-	get_first: function(conf, type, opt) {
+	get_first(conf, type, opt) {
 		var sid = null;
 
 		this.sections(conf, type, function(s) {
@@ -665,7 +663,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 		});
 
 		return this.get(conf, sid, opt);
-	},
+	}
 
 	/**
 	 * Sets the value of the given option within the first found section
@@ -691,7 +689,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 	 * the option will be removed, otherwise it will be set or overwritten
 	 * with the given value.
 	 */
-	set_first: function(conf, type, opt, val) {
+	set_first(conf, type, opt, val) {
 		var sid = null;
 
 		this.sections(conf, type, function(s) {
@@ -700,7 +698,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 		});
 
 		return this.set(conf, sid, opt, val);
-	},
+	}
 
 	/**
 	 * Removes the given option within the first found section of the given
@@ -721,9 +719,9 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 	 * @param {string} option
 	 * The option name to set the value for.
 	 */
-	unset_first: function(conf, type, opt) {
+	unset_first(conf, type, opt) {
 		return this.set_first(conf, type, opt, null);
-	},
+	}
 
 	/**
 	 * Move the first specified section within the given configuration
@@ -756,7 +754,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 	 * Returns `true` when the section was successfully moved, or `false`
 	 * when either the section specified by `sid1` or by `sid2` is not found.
 	 */
-	move: function(conf, sid1, sid2, after) {
+	move(conf, sid1, sid2, after) {
 		var sa = this.sections(conf),
 		    s1 = null, s2 = null;
 
@@ -798,7 +796,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 		this.state.reorder[conf] = true;
 
 		return true;
-	},
+	}
 
 	/**
 	 * Submits all local configuration changes to the remove `ubus` api,
@@ -810,7 +808,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 	 * Returns a promise resolving to an array of configuration names which
 	 * have been reloaded by the save operation.
 	 */
-	save: function() {
+	save() {
 		var v = this.state.values,
 		    n = this.state.creates,
 		    c = this.state.changes,
@@ -887,7 +885,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 
 			return self.load(pkgs);
 		});
-	},
+	}
 
 	/**
 	 * Instructs the remote `ubus` UCI api to commit all saved changes with
@@ -900,7 +898,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 	 * @returns {Promise<number>}
 	 * Returns a promise resolving/rejecting with the `ubus` RPC status code.
 	 */
-	apply: function(timeout) {
+	apply(timeout) {
 		var self = this,
 		    date = new Date();
 
@@ -927,7 +925,7 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 
 			window.setTimeout(try_confirm, 1000);
 		});
-	},
+	}
 
 	/**
 	 * An UCI change record is a plain array containing the change operation
@@ -980,9 +978,10 @@ return baseclass.extend(/** @lends LuCI.uci.prototype */ {
 	 * Returns a promise resolving to an object containing the configuration
 	 * names as keys and arrays of related change records as values.
 	 */
-	changes: rpc.declare({
+	changes = rpc.declare({
 		object: 'uci',
 		method: 'changes',
 		expect: { changes: { } }
 	})
-});
+}
+

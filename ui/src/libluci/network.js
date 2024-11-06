@@ -1,9 +1,8 @@
-'use strict';
-'require uci';
-'require rpc';
-'require validation';
-'require baseclass';
-'require firewall';
+import "./uci"; // 'require uci';
+import "./rpc"; // 'require rpc';
+import "./validation"; // 'require validation';
+// 'require baseclass';
+import "./firewall"; // 'require firewall';
 
 var proto_errors = {
 	CONNECT_FAILED:			_('Connection attempt failed'),
