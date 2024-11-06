@@ -1,4 +1,4 @@
-import "./rpc"; // 'require rpc';
+import { rpc } from "./rpc"; // 'require rpc';
 
 function isEmpty(object, ignore) {
 	for (var property in object)
@@ -19,8 +19,8 @@ function isEmpty(object, ignore) {
  * manipulation layer on top to allow for synchroneous operations on
  * UCI configuration data.
  */
-uci = new class Uci {
-	new() {
+class Uci {
+	constructor() {
 		this.state = {
 			newidx:  0,
 			values:  { },
@@ -985,3 +985,4 @@ uci = new class Uci {
 	})
 }
 
+export const uci = new Uci();

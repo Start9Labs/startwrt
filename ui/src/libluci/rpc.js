@@ -1,3 +1,5 @@
+import { L } from "./luci";
+
 var rpcRequestID = 1,
     rpcSessionID = L.env.sessionid || '00000000000000000000000000000000',
     rpcBaseURL = L.url('admin/ubus'),
@@ -12,9 +14,9 @@ var rpcRequestID = 1,
  * The `LuCI.rpc` class provides high level ubus JSON-RPC abstractions
  * and means for listing and invoking remove RPC methods.
  */
-return baseclass.extend(/** @lends LuCI.rpc.prototype */ {
+class Rpc {
 	/* privates */
-	call: function(req, cb, nobatch) {
+	call(req, cb, nobatch) {
 		var q = '';
 
 		if (Array.isArray(req)) {
@@ -30,14 +32,28 @@ return baseclass.extend(/** @lends LuCI.rpc.prototype */ {
 					);
 		}
 
-		return request.post(rpcBaseURL + q, req, {
-			timeout: (L.env.rpctimeout || 20) * 1000,
-			nobatch: nobatch,
-			credentials: true
-		}).then(cb, cb);
-	},
+		// TODO: what is nobatch
 
-	parseCallReply: function(req, res) {
+		return fetch(rpcBaseURL + q, {
+			method: 'POST',
+			body: JSON.stringify(req),
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			credentials: 'include',
+			signal: AbortSignal.timeout((L.env.rpctimeout || 20) * 1000)
+		})
+		.then(response => {
+			if (!response.ok) {
+				throw new Error(`HTTP error! status: ${response.status}`);
+			}
+			return response;
+		})
+		.then(cb)
+		.catch(cb);
+	}
+
+	parseCallReply(req, res) {
 		var msg = null;
 
 		if (res instanceof Error)
@@ -61,9 +77,9 @@ return baseclass.extend(/** @lends LuCI.rpc.prototype */ {
 		Promise.all(rpcInterceptorFns.map(function(fn) { return fn(msg, req) }))
 			.then(this.handleCallReply.bind(this, req, msg))
 			.catch(req.reject);
-	},
+	}
 
-	handleCallReply: function(req, msg) {
+	handleCallReply(req, msg) {
 		var type = Object.prototype.toString,
 		    ret = null;
 
@@ -113,7 +129,7 @@ return baseclass.extend(/** @lends LuCI.rpc.prototype */ {
 		}
 
 		req.resolve(ret);
-	},
+	}
 
 	/**
 	 * Lists available remote ubus objects or the method signatures of
@@ -136,12 +152,12 @@ return baseclass.extend(/** @lends LuCI.rpc.prototype */ {
 	 * more arguments, a promise resolving to an object describing the method
 	 * signatures of each requested `ubus` object name will be returned.
 	 */
-	list: function() {
+	lis(...varargs) {
 		var msg = {
 			jsonrpc: '2.0',
 			id:      rpcRequestID++,
 			method:  'list',
-			params:  arguments.length ? this.varargs(arguments) : undefined
+			params:  varargs.length ? varargs : undefined
 		};
 
 		return new Promise(L.bind(function(resolveFn, rejectFn) {
@@ -154,7 +170,7 @@ return baseclass.extend(/** @lends LuCI.rpc.prototype */ {
 			/* call rpc */
 			this.call(msg, this.parseCallReply.bind(this, req));
 		}, this));
-	},
+	}
 
 	/**
 	 * @typedef {Object} DeclareOptions
@@ -181,7 +197,7 @@ return baseclass.extend(/** @lends LuCI.rpc.prototype */ {
 	 *    When the resulting call function is invoked with `fn(true, false)`,
 	 *    the corresponding args object sent to the remote procedure will be
 	 *    `{ foo: true, bar: false }`.
-	 *  - `params: [ "test" ], filter: function(reply, args, extra) { ... }` -
+	 *  - `params: [ "test" ], filter(reply, args, extra) { ... }` -
 	 *    When the resultung generated function is invoked with
 	 *    `fn("foo", "bar", "baz")` then `{ "test": "foo" }` will be sent as
 	 *    argument to the remote procedure and the filter function will be
@@ -292,9 +308,8 @@ return baseclass.extend(/** @lends LuCI.rpc.prototype */ {
 	 * Returns a new function implementing the method call described in
 	 * `options`.
 	 */
-	declare: function(options) {
+	declare(options, ...args) {
 		return Function.prototype.bind.call(function(rpc, options) {
-			var args = this.varargs(arguments, 2);
 			return new Promise(function(resolveFn, rejectFn) {
 				/* build parameter object */
 				var p_off = 0;
@@ -338,7 +353,7 @@ return baseclass.extend(/** @lends LuCI.rpc.prototype */ {
 				rpc.call(msg, rpc.parseCallReply.bind(rpc, req), options.nobatch);
 			});
 		}, this, this, options);
-	},
+	}
 
 	/**
 	 * Returns the current RPC session id.
@@ -347,9 +362,9 @@ return baseclass.extend(/** @lends LuCI.rpc.prototype */ {
 	 * Returns the 32 byte session ID string used for authenticating remote
 	 * requests.
 	 */
-	getSessionID: function() {
+	getSessionID() {
 		return rpcSessionID;
-	},
+	}
 
 	/**
 	 * Set the RPC session id to use.
@@ -358,9 +373,9 @@ return baseclass.extend(/** @lends LuCI.rpc.prototype */ {
 	 * Sets the 32 byte session ID string used for authenticating remote
 	 * requests.
 	 */
-	setSessionID: function(sid) {
+	setSessionID(sid) {
 		rpcSessionID = sid;
-	},
+	}
 
 	/**
 	 * Returns the current RPC base URL.
@@ -368,9 +383,9 @@ return baseclass.extend(/** @lends LuCI.rpc.prototype */ {
 	 * @returns {string}
 	 * Returns the RPC URL endpoint to issue requests against.
 	 */
-	getBaseURL: function() {
+	getBaseURL() {
 		return rpcBaseURL;
-	},
+	}
 
 	/**
 	 * Set the RPC base URL to use.
@@ -378,9 +393,9 @@ return baseclass.extend(/** @lends LuCI.rpc.prototype */ {
 	 * @param {string} sid
 	 * Sets the RPC URL endpoint to issue requests against.
 	 */
-	setBaseURL: function(url) {
+	setBaseURL(url) {
 		rpcBaseURL = url;
-	},
+	}
 
 	/**
 	 * Translates a numeric `ubus` error code into a human readable
@@ -392,7 +407,7 @@ return baseclass.extend(/** @lends LuCI.rpc.prototype */ {
 	 * @returns {string}
 	 * Returns the textual description of the code.
 	 */
-	getStatusText: function(statusCode) {
+	getStatusText(statusCode) {
 		switch (statusCode) {
 		case 0: return _('Command OK');
 		case 1: return _('Invalid command');
@@ -407,7 +422,7 @@ return baseclass.extend(/** @lends LuCI.rpc.prototype */ {
 		case 10: return _('Connection lost');
 		default: return _('Unknown error code');
 		}
-	},
+	}
 
 	/**
 	 * Registered interceptor functions are invoked before the standard reply
@@ -455,11 +470,11 @@ return baseclass.extend(/** @lends LuCI.rpc.prototype */ {
 	 * @returns {LuCI.rpc~interceptorFn}
 	 * Returns the given function value.
 	 */
-	addInterceptor: function(interceptorFn) {
+	addInterceptor(interceptorFn) {
 		if (typeof(interceptorFn) == 'function')
 			rpcInterceptorFns.push(interceptorFn);
 		return interceptorFn;
-	},
+	}
 
 	/**
 	 * Removes a registered interceptor function.
@@ -471,11 +486,13 @@ return baseclass.extend(/** @lends LuCI.rpc.prototype */ {
 	 * Returns `true` if the given function has been removed or `false`
 	 * if it has not been found.
 	 */
-	removeInterceptor: function(interceptorFn) {
+	removeInterceptor(interceptorFn) {
 		var oldlen = rpcInterceptorFns.length, i = oldlen;
 		while (i--)
 			if (rpcInterceptorFns[i] === interceptorFn)
 				rpcInterceptorFns.splice(i, 1);
 		return (rpcInterceptorFns.length < oldlen);
 	}
-});
+}
+
+export const rpc = new Rpc();

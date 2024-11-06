@@ -1,6 +1,3 @@
-'use strict';
-'require baseclass';
-
 function bytelen(x) {
 	return new Blob([x]).size;
 }
@@ -18,18 +15,16 @@ function arrayle(a, b) {
 	return true;
 }
 
-var Validator = baseclass.extend({
-	__name__: 'Validation',
-
-	__init__: function(field, type, optional, vfunc, validatorFactory) {
+export class Validator {
+	constructor(field, type, optional, vfunc, validatorFactory) {
 		this.field = field;
 		this.optional = optional;
 		this.vfunc = vfunc;
 		this.vstack = validatorFactory.compile(type);
 		this.factory = validatorFactory;
-	},
+	}
 
-	assert: function(condition, message) {
+	assert(condition, message) {
 		if (!condition) {
 			this.field.classList.add('cbi-input-invalid');
 			this.error = message;
@@ -39,9 +34,9 @@ var Validator = baseclass.extend({
 		this.field.classList.remove('cbi-input-invalid');
 		this.error = null;
 		return true;
-	},
+	}
 
-	apply: function(name, value, args) {
+	apply(name, value, args) {
 		var func;
 
 		if (typeof(name) === 'function')
@@ -55,9 +50,9 @@ var Validator = baseclass.extend({
 			this.value = value;
 
 		return func.apply(this, args);
-	},
+	}
 
-	validate: function() {
+	validate() {
 		/* element is detached */
 		if (!findParent(this.field, 'body') && !findParent(this.field, '[data-field]'))
 			return true;
@@ -106,18 +101,16 @@ var Validator = baseclass.extend({
 		this.field.removeAttribute('data-tooltip-style');
 		this.field.dispatchEvent(new CustomEvent('validation-success', { bubbles: true }));
 		return true;
-	},
+	}
 
-});
+}
 
-var ValidatorFactory = baseclass.extend({
-	__name__: 'ValidatorFactory',
-
-	create: function(field, type, optional, vfunc) {
+class ValidatorFactory {
+	create(field, type, optional, vfunc) {
 		return new Validator(field, type, optional, vfunc, this);
-	},
+	}
 
-	compile: function(code) {
+	compile(code) {
 		var pos = 0;
 		var esc = false;
 		var depth = 0;
@@ -181,17 +174,17 @@ var ValidatorFactory = baseclass.extend({
 		}
 
 		return stack;
-	},
+	}
 
-	parseInteger: function(x) {
+	parseInteger(x) {
 		return (/^-?\d+$/.test(x) ? +x : NaN);
-	},
+	}
 
-	parseDecimal: function(x) {
+	parseDecimal(x) {
 		return (/^-?\d+(?:\.\d+)?$/.test(x) ? +x : NaN);
-	},
+	}
 
-	parseIPv4: function(x) {
+	parseIPv4(x) {
 		if (!x.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/))
 			return null;
 
@@ -199,9 +192,9 @@ var ValidatorFactory = baseclass.extend({
 			return null;
 
 		return [ +RegExp.$1, +RegExp.$2, +RegExp.$3, +RegExp.$4 ];
-	},
+	}
 
-	parseIPv6: function(x) {
+	parseIPv6(x) {
 		if (x.match(/^([a-fA-F0-9:]+):(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/)) {
 			var v6 = RegExp.$1, v4 = this.parseIPv4(RegExp.$2);
 
@@ -246,9 +239,9 @@ var ValidatorFactory = baseclass.extend({
 				return null;
 
 		return words;
-	},
+	}
 
-	types: {
+	types = {
 		integer: function() {
 			return this.assert(!isNaN(this.factory.parseInteger(this.value)), _('valid integer value'));
 		},
@@ -639,6 +632,6 @@ var ValidatorFactory = baseclass.extend({
 			return true;
 		}
 	}
-});
+}
 
-return ValidatorFactory;
+export const validation = new ValidatorFactory();

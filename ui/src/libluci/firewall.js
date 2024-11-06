@@ -1,6 +1,5 @@
-import "./uci"; // 'require uci';
-import "./rpc"; // 'require rpc';
-// 'require tools.prng as random';
+import { uci } from "./uci"; // 'require uci';
+import { rpc } from "./rpc"; // 'require rpc';
 
 
 function initFirewallState() {
@@ -26,9 +25,6 @@ function parseEnum(s, values) {
 function parsePolicy(s, defaultValue) {
 	return parseEnum(s, ['DROP', 'REJECT', 'ACCEPT']) || (arguments.length < 2 ? null : defaultValue);
 }
-
-
-var Firewall, AbstractFirewallItem, Defaults, Zone, Forwarding, Redirect, Rule;
 
 function lookupZone(name) {
 	var z = uci.get('firewall', name);
@@ -60,14 +56,14 @@ function getColorForName(forName) {
 }
 
 
-Firewall = L.Class.extend({
-	getDefaults: function() {
+export class Firewall {
+	getDefaults() {
 		return initFirewallState().then(function() {
 			return new Defaults();
 		});
-	},
+	}
 
-	newZone: function() {
+	newZone() {
 		return initFirewallState().then(L.bind(function() {
 			var name = 'newzone',
 			    count = 1;
@@ -77,9 +73,9 @@ Firewall = L.Class.extend({
 
 			return this.addZone(name);
 		}, this));
-	},
+	}
 
-	addZone: function(name) {
+	addZone(name) {
 		return initFirewallState().then(L.bind(function() {
 			if (name == null || !/^[a-zA-Z0-9_]+$/.test(name))
 				return null;
@@ -97,15 +93,15 @@ Firewall = L.Class.extend({
 
 			return new Zone(z);
 		}, this));
-	},
+	}
 
-	getZone: function(name) {
+	getZone(name) {
 		return initFirewallState().then(function() {
 			return lookupZone(name);
 		});
-	},
+	}
 
-	getZones: function() {
+	getZones() {
 		return initFirewallState().then(function() {
 			var sections = uci.sections('firewall', 'zone'),
 			    zones = [];
@@ -117,9 +113,9 @@ Firewall = L.Class.extend({
 
 			return zones;
 		});
-	},
+	}
 
-	getZoneByNetwork: function(network) {
+	getZoneByNetwork(network) {
 		return initFirewallState().then(function() {
 			var sections = uci.sections('firewall', 'zone');
 
@@ -129,9 +125,9 @@ Firewall = L.Class.extend({
 
 			return null;
 		});
-	},
+	}
 
-	deleteZone: function(name) {
+	deleteZone(name) {
 		return initFirewallState().then(function() {
 			var section = uci.get('firewall', name),
 			    found = false;
@@ -169,9 +165,9 @@ Firewall = L.Class.extend({
 
 			return found;
 		});
-	},
+	}
 
-	renameZone: function(oldName, newName) {
+	renameZone(oldName, newName) {
 		return initFirewallState().then(L.bind(function() {
 			if (oldName == null || newName == null || !/^[a-zA-Z0-9_]+$/.test(newName))
 				return false;
@@ -209,9 +205,9 @@ Firewall = L.Class.extend({
 
 			return found;
 		}, this));
-	},
+	}
 
-	deleteNetwork: function(network) {
+	deleteNetwork(network) {
 		return this.getZones().then(L.bind(function(zones) {
 			var rv = false;
 
@@ -221,11 +217,11 @@ Firewall = L.Class.extend({
 
 			return rv;
 		}, this));
-	},
+	}
 
-	getColorForName: getColorForName,
+	getColorForName = getColorForName;
 
-	getZoneColorStyle: function(zone) {
+	getZoneColorStyle(zone) {
 		var hex = (zone instanceof Zone) ? zone.getColor() : getColorForName((zone != null && zone != '*') ? zone : null);
 
 		return '--zone-color-rgb:%d, %d, %d; background-color:rgb(var(--zone-color-rgb))'.format(
@@ -233,23 +229,23 @@ Firewall = L.Class.extend({
 			parseInt(hex.substring(3, 5), 16),
 			parseInt(hex.substring(5, 7), 16)
 		);
-	},
-});
+	}
+}
 
 
-AbstractFirewallItem = L.Class.extend({
-	get: function(option) {
+export class AbstractFirewallItem {
+	get(option) {
 		return uci.get('firewall', this.sid, option);
-	},
+	}
 
-	set: function(option, value) {
+	set(option, value) {
 		return uci.set('firewall', this.sid, option, value);
 	}
-});
+}
 
 
-Defaults = AbstractFirewallItem.extend({
-	__init__: function() {
+export class Defaults extends AbstractFirewallItem {
+	constructor() {
 		var sections = uci.sections('firewall', 'defaults');
 
 		for (var i = 0; i < sections.length; i++) {
@@ -259,32 +255,31 @@ Defaults = AbstractFirewallItem.extend({
 
 		if (this.sid == null)
 			this.sid = uci.add('firewall', 'defaults');
-	},
+	}
 
-	isSynFlood: function() {
+	isSynFlood() {
 		return (this.get('syn_flood') == '1');
-	},
+	}
 
-	isDropInvalid: function() {
+	isDropInvalid() {
 		return (this.get('drop_invalid') == '1');
-	},
+	}
 
-	getInput: function() {
+	getInput() {
 		return parsePolicy(this.get('input'), 'DROP');
-	},
+	}
 
-	getOutput: function() {
+	getOutput() {
 		return parsePolicy(this.get('output'), 'DROP');
-	},
+	}
 
-	getForward: function() {
+	getForward() {
 		return parsePolicy(this.get('forward'), 'DROP');
 	}
-});
+}
 
-
-Zone = AbstractFirewallItem.extend({
-	__init__: function(name) {
+export class Zone extends AbstractFirewallItem {
+	constructor(name) {
 		var section = uci.get('firewall', name);
 
 		if (section != null && section['.type'] == 'zone') {
@@ -303,33 +298,33 @@ Zone = AbstractFirewallItem.extend({
 				break;
 			}
 		}
-	},
+	}
 
-	isMasquerade: function() {
+	isMasquerade() {
 		return (this.get('masq') == '1');
-	},
+	}
 
-	getName: function() {
+	getName() {
 		return this.get('name');
-	},
+	}
 
-	getNetwork: function() {
+	getNetwork() {
 		return this.get('network');
-	},
+	}
 
-	getInput: function() {
+	getInput() {
 		return parsePolicy(this.get('input'), (new Defaults()).getInput());
-	},
+	}
 
-	getOutput: function() {
+	getOutput() {
 		return parsePolicy(this.get('output'), (new Defaults()).getOutput());
-	},
+	}
 
-	getForward: function() {
+	getForward() {
 		return parsePolicy(this.get('forward'), (new Defaults()).getForward());
-	},
+	}
 
-	addNetwork: function(network) {
+	addNetwork(network) {
 		var section = uci.get('network', network);
 
 		if (section == null || section['.type'] != 'interface')
@@ -344,9 +339,9 @@ Zone = AbstractFirewallItem.extend({
 		this.set('network', newNetworks);
 
 		return true;
-	},
+	}
 
-	deleteNetwork: function(network) {
+	deleteNetwork(network) {
 		var oldNetworks = this.getNetworks(),
 		    newNetworks = oldNetworks.filter(function(net) { return net != network });
 
@@ -356,25 +351,25 @@ Zone = AbstractFirewallItem.extend({
 			this.set('network', null);
 
 		return (newNetworks.length < oldNetworks.length);
-	},
+	}
 
-	getNetworks: function() {
+	getNetworks() {
 		return L.toArray(this.get('network'));
-	},
+	}
 
-	clearNetworks: function() {
+	clearNetworks() {
 		this.set('network', null);
-	},
+	}
 
-	getDevices: function() {
+	getDevices() {
 		return L.toArray(this.get('device'));
-	},
+	}
 
-	getSubnets: function() {
+	getSubnets() {
 		return L.toArray(this.get('subnet'));
-	},
+	}
 
-	getForwardingsBy: function(what) {
+	getForwardingsBy(what) {
 		var sections = uci.sections('firewall', 'forwarding'),
 		    forwards = [];
 
@@ -389,9 +384,9 @@ Zone = AbstractFirewallItem.extend({
 		}
 
 		return forwards;
-	},
+	}
 
-	addForwardingTo: function(dest) {
+	addForwardingTo(dest) {
 		var forwards = this.getForwardingsBy('src'),
 		    zone = lookupZone(dest);
 
@@ -408,9 +403,9 @@ Zone = AbstractFirewallItem.extend({
 		uci.set('firewall', sid, 'dest', zone.getName());
 
 		return new Forwarding(sid);
-	},
+	}
 
-	addForwardingFrom: function(src) {
+	addForwardingFrom(src) {
 		var forwards = this.getForwardingsBy('dest'),
 		    zone = lookupZone(src);
 
@@ -427,9 +422,9 @@ Zone = AbstractFirewallItem.extend({
 		uci.set('firewall', sid, 'dest', this.getName());
 
 		return new Forwarding(sid);
-	},
+	}
 
-	deleteForwardingsBy: function(what) {
+	deleteForwardingsBy(what) {
 		var sections = uci.sections('firewall', 'forwarding'),
 		    found = false;
 
@@ -445,9 +440,9 @@ Zone = AbstractFirewallItem.extend({
 		}
 
 		return found;
-	},
+	}
 
-	deleteForwarding: function(forwarding) {
+	deleteForwarding(forwarding) {
 		if (!(forwarding instanceof Forwarding))
 			return false;
 
@@ -459,9 +454,9 @@ Zone = AbstractFirewallItem.extend({
 		uci.remove('firewall', section['.name']);
 
 		return true;
-	},
+	}
 
-	addRedirect: function(options) {
+	addRedirect(options) {
 		var sid = uci.add('firewall', 'redirect');
 
 		if (options != null && typeof(options) == 'object')
@@ -472,9 +467,9 @@ Zone = AbstractFirewallItem.extend({
 		uci.set('firewall', sid, 'src', this.getName());
 
 		return new Redirect(sid);
-	},
+	}
 
-	addRule: function(options) {
+	addRule(options) {
 		var sid = uci.add('firewall', 'rule');
 
 		if (options != null && typeof(options) == 'object')
@@ -485,75 +480,74 @@ Zone = AbstractFirewallItem.extend({
 		uci.set('firewall', sid, 'src', this.getName());
 
 		return new Rule(sid);
-	},
+	}
 
-	getColor: function(forName) {
+	getColor(forName) {
 		var name = (arguments.length > 0 ? forName : this.getName());
 
 		return getColorForName(name);
 	}
-});
+}
 
-
-Forwarding = AbstractFirewallItem.extend({
-	__init__: function(sid) {
+export class Forwarding extends AbstractFirewallItem {
+	constructor(sid) {
 		this.sid = sid;
-	},
+	}
 
-	getSource: function() {
+	getSource() {
 		return this.get('src');
-	},
+	}
 
-	getDestination: function() {
+	getDestination() {
 		return this.get('dest');
-	},
+	}
 
-	getSourceZone: function() {
+	getSourceZone() {
 		return lookupZone(this.getSource());
-	},
+	}
 
-	getDestinationZone: function() {
+	getDestinationZone() {
 		return lookupZone(this.getDestination());
 	}
-});
+}
 
 
-Rule = AbstractFirewallItem.extend({
-	getSource: function() {
+export class Rule extends AbstractFirewallItem {
+	getSource() {
 		return this.get('src');
-	},
+	}
 
-	getDestination: function() {
+	getDestination() {
 		return this.get('dest');
-	},
+	}
 
-	getSourceZone: function() {
+	getSourceZone() {
 		return lookupZone(this.getSource());
-	},
+	}
 
-	getDestinationZone: function() {
+	getDestinationZone() {
 		return lookupZone(this.getDestination());
 	}
-});
+}
 
 
-Redirect = AbstractFirewallItem.extend({
-	getSource: function() {
+export class Redirect {
+	getSource() {
 		return this.get('src');
-	},
+	}
 
-	getDestination: function() {
+	getDestination() {
 		return this.get('dest');
-	},
+	}
 
-	getSourceZone: function() {
+	getSourceZone() {
 		return lookupZone(this.getSource());
-	},
+	}
 
-	getDestinationZone: function() {
+	getDestinationZone() {
 		return lookupZone(this.getDestination());
 	}
-});
+}
 
 
-return Firewall;
+export const firewall = new Firewall();
