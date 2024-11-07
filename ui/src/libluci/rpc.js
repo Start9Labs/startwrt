@@ -53,7 +53,7 @@ class Rpc {
 		.catch(cb);
 	}
 
-	parseCallReply(req, res) {
+	async parseCallReply(req, res) {
 		var msg = null;
 
 		if (res instanceof Error)
@@ -64,7 +64,7 @@ class Rpc {
 				L.raise('RPCError', 'RPC call to %s/%s failed with HTTP error %d: %s',
 					req.object, req.method, res.status, res.statusText || '?');
 
-			msg = res.json();
+			msg = await res.json();
 		}
 		catch (e) {
 			return req.reject(e);
@@ -74,7 +74,8 @@ class Rpc {
 		 * The interceptor args are intentionally swapped.
 		 * Response is passed as first arg to align with Request class interceptors
 		 */
-		Promise.all(rpcInterceptorFns.map(function(fn) { return fn(msg, req) }))
+		await Promise.all(rpcInterceptorFns.map(function(fn) { return fn(msg, req) }))
+			.then(msg)
 			.then(this.handleCallReply.bind(this, req, msg))
 			.catch(req.reject);
 	}
@@ -308,8 +309,8 @@ class Rpc {
 	 * Returns a new function implementing the method call described in
 	 * `options`.
 	 */
-	declare(options, ...args) {
-		return Function.prototype.bind.call(function(rpc, options) {
+	declare(options) {
+		return Function.prototype.bind.call(function(rpc, options, ...args) {
 			return new Promise(function(resolveFn, rejectFn) {
 				/* build parameter object */
 				var p_off = 0;
@@ -409,18 +410,18 @@ class Rpc {
 	 */
 	getStatusText(statusCode) {
 		switch (statusCode) {
-		case 0: return _('Command OK');
-		case 1: return _('Invalid command');
-		case 2: return _('Invalid argument');
-		case 3: return _('Method not found');
-		case 4: return _('Resource not found');
-		case 5: return _('No data received');
-		case 6: return _('Permission denied');
-		case 7: return _('Request timeout');
-		case 8: return _('Not supported');
-		case 9: return _('Unspecified error');
-		case 10: return _('Connection lost');
-		default: return _('Unknown error code');
+		case 0: return'Command OK';
+		case 1: return'Invalid command';
+		case 2: return'Invalid argument';
+		case 3: return'Method not found';
+		case 4: return'Resource not found';
+		case 5: return'No data received';
+		case 6: return'Permission denied';
+		case 7: return'Request timeout';
+		case 8: return'Not supported';
+		case 9: return'Unspecified error';
+		case 10: return'Connection lost';
+		default: return'Unknown error code';
 		}
 	}
 

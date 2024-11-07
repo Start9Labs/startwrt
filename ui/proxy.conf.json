@@ -1,0 +1,11 @@
+{
+    "/admin": {
+        "target": "http://192.168.122.192",
+        "secure": false,
+        "changeOrigin": true,
+        "pathRewrite": {
+            "^/admin": ""
+        },
+        "logLevel": "debug"
+    }
+}
