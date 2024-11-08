@@ -110,7 +110,7 @@ pub fn parse_uci(mut read: impl BufRead, visit: &mut impl VisitUci) -> Result<()
         match &*keyword.as_str() {
             "config" => {
                 let (ty, name): (Token, Token) =
-                    inpt(rest).map_err(|err| eyre!("could not parse section: {err:?}"))?;
+                    inpt(rest).map_err(|err| eyre!("could not parse section: {err}"))?;
                 let name: Option<Cow<'_, str>> = match name {
                     Token::W(Word { inner: "" }) => None,
                     _ => Some(ty.as_str()),
@@ -124,12 +124,12 @@ pub fn parse_uci(mut read: impl BufRead, visit: &mut impl VisitUci) -> Result<()
             }
             "option" => {
                 let (option, value): (Token, Token) =
-                    inpt(rest).map_err(|err| eyre!("could not parse option: {err:?}"))?;
+                    inpt(rest).map_err(|err| eyre!("could not parse option: {err}"))?;
                 visit.option(&option.as_str(), &value.as_str())?;
             }
             "list" => {
                 let (list, item): (Token, Token) =
-                    inpt(rest).map_err(|err| eyre!("could not parse list: {err:?}"))?;
+                    inpt(rest).map_err(|err| eyre!("could not parse list: {err}"))?;
                 visit.list(&list.as_str(), &item.as_str())?;
             }
             kw => bail!("unknown UCI keyword {kw:?}"),
