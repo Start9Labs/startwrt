@@ -1,4 +1,4 @@
-import "./rpc" // 'require rpc';
+import { rpc } from "./rpc" // 'require rpc';
 
 /**
  * @typedef {Object} FileStatEntry
@@ -151,7 +151,7 @@ function handleCgiIoReply(res) {
  * To import the class in views, use `'require fs'`, to import it in
  * external JavaScript, use `L.require("fs").then(...)`.
  */
-var FileSystem = baseclass.extend(/** @lends LuCI.fs.prototype */ {
+class FileSystem {
 	/**
 	 * Obtains a listing of the specified directory.
 	 *
@@ -162,7 +162,7 @@ var FileSystem = baseclass.extend(/** @lends LuCI.fs.prototype */ {
 	 * Returns a promise resolving to an array of stat detail objects or
 	 * rejecting with an error stating the failure reason.
 	 */
-	list: function(path) {
+	list(path) {
 		return callFileList(path).then(handleRpcReply.bind(this, { entries: [] }));
 	},
 
@@ -176,7 +176,7 @@ var FileSystem = baseclass.extend(/** @lends LuCI.fs.prototype */ {
 	 * Returns a promise resolving to a stat detail object or
 	 * rejecting with an error stating the failure reason.
 	 */
-	stat: function(path) {
+	stat(path) {
 		return callFileStat(path).then(handleRpcReply.bind(this, { '': {} }));
 	},
 
@@ -191,9 +191,9 @@ var FileSystem = baseclass.extend(/** @lends LuCI.fs.prototype */ {
 	 * Returns a promise resolving to a string containing the file contents or
 	 * rejecting with an error stating the failure reason.
 	 */
-	read: function(path) {
+	read(path) {
 		return callFileRead(path).then(handleRpcReply.bind(this, { data: '' }));
-	},
+	}
 
 	/**
 	 * Write the given data to the specified file path.
@@ -217,11 +217,11 @@ var FileSystem = baseclass.extend(/** @lends LuCI.fs.prototype */ {
 	 * Returns a promise resolving to `0` or rejecting with an error stating
 	 * the failure reason.
 	 */
-	write: function(path, data, mode) {
+	write(path, data, mode) {
 		data = (data != null) ? String(data) : '';
 		mode = (mode != null) ? mode : 420; // 0644
 		return callFileWrite(path, data, mode).then(handleRpcReply.bind(this, { '': 0 }));
-	},
+	}
 
 	/**
 	 * Unlink the given file.
@@ -233,9 +233,9 @@ var FileSystem = baseclass.extend(/** @lends LuCI.fs.prototype */ {
 	 * Returns a promise resolving to `0` or rejecting with an error stating
 	 * the failure reason.
 	 */
-	remove: function(path) {
+	remove(path) {
 		return callFileRemove(path).then(handleRpcReply.bind(this, { '': 0 }));
-	},
+	}
 
 	/**
 	 * Execute the specified command, optionally passing params and
@@ -262,7 +262,7 @@ var FileSystem = baseclass.extend(/** @lends LuCI.fs.prototype */ {
 	 * Returns a promise resolving to an object describing the execution
 	 * results or rejecting with an error stating the failure reason.
 	 */
-	exec: function(command, params, env) {
+	exec(command, params, env) {
 		if (!Array.isArray(params))
 			params = null;
 
@@ -270,7 +270,7 @@ var FileSystem = baseclass.extend(/** @lends LuCI.fs.prototype */ {
 			env = null;
 
 		return callFileExec(command, params, env).then(handleRpcReply.bind(this, { '': {} }));
-	},
+	}
 
 	/**
 	 * Read the contents of the given file, trim leading and trailing white
@@ -290,11 +290,11 @@ var FileSystem = baseclass.extend(/** @lends LuCI.fs.prototype */ {
 	 * Returns a promise resolving to the file contents or the empty string
 	 * on failure.
 	 */
-	trimmed: function(path) {
+	trimmed(path) {
 		return L.resolveDefault(this.read(path), '').then(function(s) {
 			return s.trim();
 		});
-	},
+	}
 
 	/**
 	 * Read the contents of the given file, split it into lines, trim
@@ -311,7 +311,7 @@ var FileSystem = baseclass.extend(/** @lends LuCI.fs.prototype */ {
 	 * Returns a promise resolving to an array containing the stripped lines
 	 * of the given file or `[]` on failure.
 	 */
-	lines: function(path) {
+	lines(path) {
 		return L.resolveDefault(this.read(path), '').then(function(s) {
 			var lines = [];
 
@@ -326,7 +326,7 @@ var FileSystem = baseclass.extend(/** @lends LuCI.fs.prototype */ {
 
 			return lines;
 		});
-	},
+	}
 
 	/**
 	 * Read the contents of the given file and return them, bypassing ubus.
@@ -352,7 +352,7 @@ var FileSystem = baseclass.extend(/** @lends LuCI.fs.prototype */ {
 	 * to the specified type or rejecting with an error stating the failure
 	 * reason.
 	 */
-	read_direct: function(path, type) {
+	read_direct(path, type) {
 		var postdata = 'sessionid=%s&path=%s'
 			.format(encodeURIComponent(L.env.sessionid), encodeURIComponent(path));
 
@@ -360,7 +360,7 @@ var FileSystem = baseclass.extend(/** @lends LuCI.fs.prototype */ {
 			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
 			responseType: (type == 'blob') ? 'blob' : 'text'
 		}).then(handleCgiIoReply.bind({ type: type }));
-	},
+	}
 
 	/**
 	 * Execute the specified command, bypassing ubus.
@@ -399,7 +399,7 @@ var FileSystem = baseclass.extend(/** @lends LuCI.fs.prototype */ {
 	 * according to the specified type or rejecting with an error stating the
 	 * failure reason.
 	 */
-	exec_direct: function(command, params, type, latin1) {
+	exec_direct(command, params, type, latin1) {
 		var cmdstr = String(command)
 			.replace(/\\/g, '\\\\').replace(/(\s)/g, '\\$1');
 
@@ -421,6 +421,6 @@ var FileSystem = baseclass.extend(/** @lends LuCI.fs.prototype */ {
 			responseType: (type == 'blob') ? 'blob' : 'text'
 		}).then(handleCgiIoReply.bind({ type: type }));
 	}
-});
+}
 
-return FileSystem;
+export const fs = new FileSystem();

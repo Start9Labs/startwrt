@@ -1,6 +1,4 @@
 import { uci } from "./uci"; // 'require uci';
-import { rpc } from "./rpc"; // 'require rpc';
-
 
 function initFirewallState() {
 	return L.resolveDefault(uci.load('firewall'));
