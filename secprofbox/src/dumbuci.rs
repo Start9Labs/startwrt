@@ -157,15 +157,19 @@ pub fn rewrite_config<'a, V: VisitUci + AsRef<WriteUci>>(
     with: impl FnOnce(WriteUci) -> V,
 ) -> Result<V, Error> {
     use fd_lock_rs::{FdLock, LockType};
-    use std::io::{BufReader, SeekFrom};
-    let file = File::options().write(true).truncate(false).open(path)?;
+    use std::io::BufReader;
+    let file = File::options()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(path)?;
     let mut locked = FdLock::lock(file, LockType::Exclusive, true)?;
     let mut v = with(WriteUci {
         writer: Vec::<u8>::new(),
     });
     parse_uci(BufReader::new(&mut *locked), &mut v)?;
     locked.set_len(0)?;
-    locked.seek(SeekFrom::Start(0))?;
     locked.write_all(&v.as_ref().writer)?;
     Ok(v)
 }

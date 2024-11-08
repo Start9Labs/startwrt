@@ -37,27 +37,28 @@ struct Pairing<'s> {
     pkt_ty: &'s str,
 }
 
-struct UpdateUci {
+// this state machine came out a bit more crazy than I expected
+struct UpdateWifiConnection {
     out: WriteUci,
     in_wifi_connection: bool,
     clear_keyid: bool,
-    insert_interface: String,
-    insert_mac: String,
-    insert_keyid: Option<String>,
-    insert_ip: Option<String>,
+    update_interface: String,
+    update_mac: String,
+    update_keyid: Option<String>,
+    update_ip: Option<String>,
     at_interface: Option<String>,
     at_mac: Option<String>,
     at_keyid: Option<String>,
     at_ip: Option<String>,
 }
 
-impl AsRef<WriteUci> for UpdateUci {
+impl AsRef<WriteUci> for UpdateWifiConnection {
     fn as_ref(&self) -> &WriteUci {
         &self.out
     }
 }
 
-impl VisitUci for UpdateUci {
+impl VisitUci for UpdateWifiConnection {
     fn enter_section(&mut self, ty: &str, name: Option<&str>) -> Result<(), Error> {
         self.in_wifi_connection = ty == "wifi_connection";
         self.at_interface = None;
@@ -74,8 +75,11 @@ impl VisitUci for UpdateUci {
         if !self.in_wifi_connection {
             return self.out.exit_section();
         }
-        if self.at_mac.as_deref() != Some(self.insert_mac.as_str()) && self.at_ip != self.insert_ip
-        {
+
+        if self.at_mac.as_deref() == Some(self.update_mac.as_str()) {
+            self.update_ip = self.update_ip.take().or(self.at_ip.take());
+            self.update_keyid = self.at_keyid.take().or(self.at_keyid.take());
+        } else if self.update_ip.is_none() || self.at_ip != self.update_ip {
             self.out.enter_section("wifi_connection", None)?;
             if let Some(interface) = &self.at_interface {
                 self.out.option("interface", interface)?;
@@ -90,9 +94,6 @@ impl VisitUci for UpdateUci {
                 self.out.option("keyid", keyid)?;
             }
             return self.out.exit_section();
-        } else {
-            self.insert_ip = self.insert_ip.take().or(self.at_ip.take());
-            self.insert_keyid = self.at_keyid.take().or(self.at_keyid.take());
         }
         Ok(())
     }
@@ -129,13 +130,13 @@ impl VisitUci for UpdateUci {
 
     fn finish(&mut self) -> Result<(), Error> {
         self.out.enter_section("wifi_connection", None)?;
-        self.out.option("interface", &self.insert_interface)?;
-        self.out.option("mac_addr", &self.insert_mac)?;
-        if let Some(ip) = &self.insert_ip {
+        self.out.option("interface", &self.update_interface)?;
+        self.out.option("mac_addr", &self.update_mac)?;
+        if let Some(ip) = &self.update_ip {
             self.out.option("ip_addr", ip)?;
         }
         if !self.clear_keyid {
-            if let Some(keyid) = &self.insert_keyid {
+            if let Some(keyid) = &self.update_keyid {
                 self.out.option("keyid", keyid)?;
             }
         }
@@ -144,7 +145,9 @@ impl VisitUci for UpdateUci {
     }
 }
 
-struct Actor {}
+struct Actor {
+    // TODO: do we actually need any in-memory state here?
+}
 
 impl Actor {
     fn handle_connected(
@@ -162,14 +165,14 @@ impl Actor {
                 None
             }
         });
-        rewrite_config("/", |out| UpdateUci {
+        rewrite_config("/etc/config/secprofstate", |out| UpdateWifiConnection {
             out,
             clear_keyid: keyid.is_none(),
             in_wifi_connection: false,
-            insert_interface: interface.to_owned(),
-            insert_mac: mac.to_owned(),
-            insert_keyid: keyid,
-            insert_ip: None,
+            update_interface: interface.to_owned(),
+            update_mac: mac.to_owned(),
+            update_keyid: keyid,
+            update_ip: None,
             at_interface: None,
             at_mac: None,
             at_keyid: None,
@@ -187,14 +190,14 @@ impl Actor {
             ..
         }: Pairing,
     ) -> Result<(), Error> {
-        rewrite_config("/", |out| UpdateUci {
+        rewrite_config("/etc/config/secprofstate", |out| UpdateWifiConnection {
             out,
             clear_keyid: false,
             in_wifi_connection: false,
-            insert_interface: interface.to_owned(),
-            insert_mac: eth_addr.to_owned(),
-            insert_keyid: None,
-            insert_ip: Some(ip_addr.to_owned()),
+            update_interface: interface.to_owned(),
+            update_mac: eth_addr.to_owned(),
+            update_keyid: None,
+            update_ip: Some(ip_addr.to_owned()),
             at_interface: None,
             at_mac: None,
             at_keyid: None,
