@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, ffi::OsString, net::Ipv4Addr};
+use std::{collections::VecDeque, ffi::OsString, net::Ipv4Addr, process::ExitCode};
 
 pub struct SecurityProfileId(pub String);
 
@@ -108,6 +108,6 @@ pub fn make_rules(
     res
 }
 
-pub fn main(args: VecDeque<OsString>) {
+pub fn main(args: VecDeque<OsString>) -> ExitCode {
     todo!()
 }

@@ -1,21 +1,22 @@
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::path::Path;
+use std::process::ExitCode;
 use tracing::subscriber::DefaultGuard;
 
-#[cfg(feature = "hostapdhook")]
-mod hostapdhook;
-#[cfg(feature = "secprofmap")]
-mod secprofmap;
+#[cfg(feature = "secprof-map")]
+mod map;
+#[cfg(feature = "secprof-watchwifi")]
+mod watchwifi;
 
 pub mod dumbuci;
 
-fn select_executable(name: &str) -> Option<fn(VecDeque<OsString>)> {
+fn select_executable(name: &str) -> Option<fn(VecDeque<OsString>) -> ExitCode> {
     match name {
-        #[cfg(feature = "hostapdhook")]
-        "secprof-hostapdhook" => Some(hostapdhook::main),
-        #[cfg(feature = "secprofmap")]
-        "secprof-map" => Some(secprofmap::main),
+        #[cfg(feature = "secprof-watchwifi")]
+        "secprof-watchwifi" => Some(watchwifi::main),
+        #[cfg(feature = "secprof-map")]
+        "secprof-map" => Some(map::main),
         _ => None,
     }
 }
@@ -43,7 +44,7 @@ fn init_logging(name: &str) -> DefaultGuard {
     tracing::subscriber::set_default(subscriber)
 }
 
-pub fn main() {
+pub fn main() -> ExitCode {
     let mut args = std::env::args_os().collect::<VecDeque<_>>();
     for _ in 0..2 {
         let Some(s) = args.pop_front() else { break };
@@ -65,5 +66,5 @@ pub fn main() {
             .map(|s| s.as_str())
             .unwrap_or("N/A")
     );
-    std::process::exit(1);
+    ExitCode::from(1)
 }
