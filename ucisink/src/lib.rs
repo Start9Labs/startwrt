@@ -234,7 +234,7 @@ pub fn read_config<V: UciSink>(path: impl AsRef<Path>, mut with: V) -> Result<V,
 
 /// TODO: async version?
 /// TODO: is the visitor->output pattern worse than parsing the file into hashmaps and mutating them?
-pub fn rewrite_config<V: UciSink + AsRef<WriteUci>>(
+pub fn rewrite_config<V: UciSink>(
     path: impl AsRef<Path>,
     with: impl FnOnce(WriteUci) -> V,
 ) -> Result<V, Error> {

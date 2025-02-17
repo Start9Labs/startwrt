@@ -8,6 +8,7 @@ pub struct SecurityProfile {
     allow_wan: bool,
 }
 
+#[derive(Clone)]
 pub struct Zone(pub String);
 
 pub enum Target {

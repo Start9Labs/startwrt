@@ -7,8 +7,6 @@ use tokio::io::AsyncBufReadExt;
 use tokio::select;
 use tracing::{debug, error, warn};
 
-use crate::dumbuci::{rewrite_config, VisitUci, WriteUci};
-
 #[derive(Inpt, Debug)]
 #[inpt(regex = r"([^ ]+)=([^ ]+)")]
 struct ConnectedKv<'s>(&'s str, &'s str);
@@ -37,6 +35,7 @@ struct Pairing<'s> {
     pkt_ty: &'s str,
 }
 
+/*
 // this state machine came out a bit more crazy than I expected
 struct UpdateWifiConnection {
     out: WriteUci,
@@ -144,6 +143,7 @@ impl VisitUci for UpdateWifiConnection {
         Ok(())
     }
 }
+*/
 
 struct Actor {
     // TODO: do we actually need any in-memory state here?
@@ -165,7 +165,7 @@ impl Actor {
                 None
             }
         });
-        rewrite_config("/etc/config/secprofstate", |out| UpdateWifiConnection {
+        /*rewrite_config("/etc/config/secprofstate", |out| UpdateWifiConnection {
             out,
             clear_keyid: keyid.is_none(),
             in_wifi_connection: false,
@@ -177,7 +177,7 @@ impl Actor {
             at_mac: None,
             at_keyid: None,
             at_ip: None,
-        });
+        });*/
         Ok(())
     }
 
@@ -190,7 +190,7 @@ impl Actor {
             ..
         }: Pairing,
     ) -> Result<(), Error> {
-        rewrite_config("/etc/config/secprofstate", |out| UpdateWifiConnection {
+        /*rewrite_config("/etc/config/secprofstate", |out| UpdateWifiConnection {
             out,
             clear_keyid: false,
             in_wifi_connection: false,
@@ -202,7 +202,7 @@ impl Actor {
             at_mac: None,
             at_keyid: None,
             at_ip: None,
-        });
+        });*/
         Ok(())
     }
 }
