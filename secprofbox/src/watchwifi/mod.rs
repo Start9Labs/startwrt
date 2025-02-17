@@ -241,7 +241,7 @@ pub async fn start(actor: &mut Actor) -> Result<(), Error> {
                 }
             },
             line = addrwatch_lines.next_line() => {
-                let Some(line) = line.context("reading from addrwatch")? else { bail!("hostapd shutdown unexpectedly") };
+                let Some(line) = line.context("reading from addrwatch")? else { bail!("addrwatch shutdown unexpectedly") };
                 let msg = match inpt(&line) {
                     Ok(msg) => msg,
                     Err(err) => {

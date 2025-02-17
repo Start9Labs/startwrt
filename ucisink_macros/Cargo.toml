@@ -1,0 +1,7 @@
+[package]
+name = "ucisink_macros"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+darling = "0.20.10"
