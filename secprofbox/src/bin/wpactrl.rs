@@ -3,15 +3,18 @@ use std::io::Write;
 use std::{env::args, io::stdout};
 use tokio::io::{AsyncBufReadExt as _, BufReader};
 use tokio::spawn;
-use tracing::error;
+use tracing::{error, info};
 
 #[tokio::main]
 pub async fn main() {
     let path = args().nth(1).expect("usage: wpactrl [unix socket path]");
-    init_logging("wpactrl");
-    let Ok(mut ctrl) = WpaCtrl::open(&path).await else {
-        error!("could not connect to socket {path:?}");
-        return;
+    let _logging = init_logging("wpactrl");
+    let mut ctrl = match WpaCtrl::open(&path).await {
+        Ok(ctrl) => ctrl,
+        Err(err) => {
+            eprintln!("could not connect to socket {path:?}: {err}");
+            return;
+        }
     };
     let mut events = ctrl.subscribe();
     spawn(async move {
@@ -20,15 +23,18 @@ pub async fn main() {
             writeln!(out.lock(), "{}", event).unwrap();
         }
     });
+    let stdout = stdout();
     let stdin = BufReader::new(tokio::io::stdin());
     let mut lines = stdin.lines();
-    let stdout = stdout();
     loop {
         let line = match lines.next_line().await {
             Ok(Some(l)) => l,
-            Ok(None) => break,
+            Ok(None) => {
+                info!("no more lines");
+                break;
+            }
             Err(err) => {
-                error!("could not read stdin: {}", err);
+                eprintln!("could not read stdin: {}", err);
                 break;
             }
         };
@@ -36,7 +42,7 @@ pub async fn main() {
             Ok(res) => {
                 writeln!(stdout.lock(), "{}", res).unwrap();
             }
-            Err(err) => error!("could not send command: {}", err),
+            Err(err) => eprintln!("could not send command: {}", err),
         }
     }
 }
