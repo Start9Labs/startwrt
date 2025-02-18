@@ -1,10 +1,8 @@
 use async_cell::sync::AsyncCell;
-use color_eyre::eyre::{eyre, Error};
-use std::ffi::CString;
+use color_eyre::eyre::Error;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::net::UnixDatagram;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
@@ -14,7 +12,7 @@ const BUF_SIZE: usize = 10_240;
 struct WpaCtrlInner {
     event_sender: Sender<String>,
     response: AsyncCell<String>,
-    socket: UnixDatagram,
+    socket: tokio::net::UnixDatagram,
 }
 
 impl WpaCtrlInner {
@@ -37,7 +35,6 @@ impl WpaCtrlInner {
                     continue;
                 }
             };
-            dbg!(&msg);
 
             if msg.starts_with('<') {
                 info!("Event: {}", msg);
@@ -61,7 +58,7 @@ pub struct WpaCtrl {
     ctrl_filepath: PathBuf,
 }
 
-static COUNTER: AtomicU64 = AtomicU64::new(0);
+static COUNTER: AtomicU64 = AtomicU64::new(1);
 
 impl WpaCtrl {
     pub async fn open<P: AsRef<Path>>(ctrl_filepath: P) -> Result<Self, Error> {
@@ -70,7 +67,7 @@ impl WpaCtrl {
         let bind_filename = format!("wpa_ctrl_{}-{}", std::process::id(), counter);
         let bind_filepath = Path::new("/tmp").join(bind_filename);
 
-        let socket = UnixDatagram::bind(&bind_filepath)?;
+        let socket = tokio::net::UnixDatagram::bind(&bind_filepath)?;
         socket.connect(&ctrl_filepath)?;
 
         let (event_sender, _) = broadcast::channel(8);
