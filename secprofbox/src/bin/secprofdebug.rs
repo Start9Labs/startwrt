@@ -1,4 +1,4 @@
-use color_eyre::eyre::{bail, Error};
+use color_eyre::eyre::Error;
 use secprofbox::monitor::{monitor_addrwatch, monitor_wpa};
 use secprofbox::{init_logging, state::WatchState};
 use tokio::task::JoinSet;
@@ -22,7 +22,7 @@ pub async fn main() {
     let state = WatchState::new(Default::default());
     tasks.spawn(log_state(state.clone()));
     tasks.spawn(monitor_wpa(state.clone(), "phy0-ap0".into()));
-    tasks.spawn(monitor_addrwatch(state.clone()));
+    tasks.spawn(monitor_addrwatch(state.clone(), vec!["phy0-ap0".into()]));
 
     loop {
         match tasks.join_next().await {

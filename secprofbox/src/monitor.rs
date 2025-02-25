@@ -6,7 +6,7 @@ use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::{error, info};
 
-use crate::state::{WatchState, WifiConnectionId};
+use crate::state::{ConnectionId, WatchState};
 use crate::wpactrl::WpaCtrl;
 
 #[derive(Inpt, Debug)]
@@ -15,16 +15,14 @@ struct WpaEventKv<'s>(&'s str, &'s str);
 
 #[derive(Debug, Inpt)]
 enum WpaEvent<'s> {
-    #[inpt(regex = r"<(\d)>AP-STA-CONNECTED ([A-Za-z\d:]+)")]
+    #[inpt(regex = r"<\d>AP-STA-CONNECTED ([A-Za-z\d:]+)")]
     Connected {
-        _level: u8,
         mac: &'s str,
         #[inpt(after)]
         kvs: Vec<WpaEventKv<'s>>,
     },
-    #[inpt(regex = r"<(\d)>AP-STA-DISCONNECTED ([A-Za-z\d:]+)")]
+    #[inpt(regex = r"<\d>AP-STA-DISCONNECTED ([A-Za-z\d:]+)")]
     Disconnected {
-        _level: u8,
         mac: &'s str,
         #[inpt(after)]
         _kvs: Vec<WpaEventKv<'s>>,
@@ -51,8 +49,8 @@ pub async fn monitor_wpa(state: WatchState, interface: String) -> Result<(), Err
                 }
                 state.send_modify(|state| {
                     state
-                        .wifi_connections
-                        .entry(WifiConnectionId {
+                        .connections
+                        .entry(ConnectionId {
                             interface: interface.clone(),
                             mac: mac.into(),
                         })
@@ -62,7 +60,7 @@ pub async fn monitor_wpa(state: WatchState, interface: String) -> Result<(), Err
             }
             Ok(WpaEvent::Disconnected { mac, .. }) => {
                 state.send_modify(|state| {
-                    state.wifi_connections.remove(&WifiConnectionId {
+                    state.connections.remove(&ConnectionId {
                         interface: interface.clone(),
                         mac: mac.into(),
                     });
@@ -90,11 +88,12 @@ struct AddrWatchEvent<'s> {
     _pkt_ty: &'s str,
 }
 
-pub async fn monitor_addrwatch(state: WatchState) -> Result<(), Error> {
+pub async fn monitor_addrwatch(state: WatchState, interfaces: Vec<String>) -> Result<(), Error> {
     use tokio::process::Command;
 
     let addrwatch = Command::new("addrwatch")
         .stdout(Stdio::piped())
+        .args(interfaces)
         .spawn()
         .context("spawning addrwatch")?;
     let addrwatch_out = addrwatch
@@ -114,14 +113,17 @@ pub async fn monitor_addrwatch(state: WatchState) -> Result<(), Error> {
         };
 
         state.send_modify(|state| {
-            state
-                .wifi_connections
-                .entry(WifiConnectionId {
+            let conn = state
+                .connections
+                .entry(ConnectionId {
                     interface: interface.into(),
                     mac: eth_addr.into(),
                 })
-                .or_default()
-                .ip = Some(ip_addr);
+                .or_default();
+            match ip_addr {
+                IpAddr::V4(ipv4) => conn.ipv4 = Some(ipv4),
+                IpAddr::V6(ipv6) => conn.ipv6 = Some(ipv6),
+            }
         });
     }
 

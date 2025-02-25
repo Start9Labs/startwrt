@@ -1,5 +1,7 @@
 use async_cell::sync::AsyncCell;
 use color_eyre::eyre::Error;
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -68,6 +70,7 @@ impl WpaCtrl {
         let bind_filepath = Path::new("/tmp").join(bind_filename);
 
         let socket = tokio::net::UnixDatagram::bind(&bind_filepath)?;
+        fs::set_permissions(&bind_filepath, fs::Permissions::from_mode(0o777))?;
         socket.connect(&ctrl_filepath)?;
 
         let (event_sender, _) = broadcast::channel(8);
