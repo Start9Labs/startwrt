@@ -3,7 +3,7 @@ use std::io::Write;
 use std::{env::args, io::stdout};
 use tokio::io::{AsyncBufReadExt as _, BufReader};
 use tokio::spawn;
-use tracing::{error, info};
+use tracing::info;
 
 #[tokio::main]
 pub async fn main() {

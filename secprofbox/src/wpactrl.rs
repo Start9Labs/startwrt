@@ -23,7 +23,7 @@ impl WpaCtrlInner {
             let len = match self.socket.recv(&mut buf).await {
                 Ok(len) => len,
                 Err(e) => {
-                    error!("Failed to read from socket: {}", e);
+                    error!("failed to read from socket: {}", e);
                     break;
                 }
             };
@@ -31,19 +31,19 @@ impl WpaCtrlInner {
             let msg = match std::str::from_utf8(&buf[..len]) {
                 Ok(msg) => msg.trim().to_string(),
                 Err(err) => {
-                    error!("Socket provided non-utf8 bytes: {}", err);
+                    error!("socket provided non-utf8 bytes: {}", err);
                     continue;
                 }
             };
 
             if msg.starts_with('<') {
-                info!("Event: {}", msg);
+                info!("event: {}", msg);
                 if self.event_sender.send(msg).is_err() {
                     // Drop the event
                     continue;
                 }
             } else {
-                info!("Response: {}", msg);
+                info!("response: {}", msg);
                 // Signal completion of the request
                 self.response.set(msg);
             }

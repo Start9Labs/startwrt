@@ -1,25 +1,10 @@
-use std::collections::VecDeque;
-use std::ffi::OsString;
-use std::process::ExitCode;
 use tracing::subscriber::DefaultGuard;
 
-#[cfg(feature = "secprof-map")]
-mod map;
-#[cfg(feature = "secprof-watchwifi")]
-mod watchwifi;
-
+pub mod map;
+pub mod monitor;
 pub mod state;
+pub mod watchutil;
 pub mod wpactrl;
-
-pub fn select_executable(name: &str) -> Option<fn(VecDeque<OsString>) -> ExitCode> {
-    match name {
-        #[cfg(feature = "secprof-watchwifi")]
-        "secprof-watchwifi" => Some(watchwifi::main),
-        #[cfg(feature = "secprof-map")]
-        "secprof-map" => Some(map::main),
-        _ => None,
-    }
-}
 
 pub fn init_logging(name: &str) -> DefaultGuard {
     use tracing_rfc_5424::{
