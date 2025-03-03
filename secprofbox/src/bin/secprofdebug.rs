@@ -31,7 +31,6 @@ pub async fn log_firewall(mut state: WatchState) -> Result<(), Error> {
 #[tokio::main]
 pub async fn main() {
     let _logging = init_logging("secprofdebug");
-    info!("running secprofdebug");
     let mut tasks = JoinSet::new();
     let state = WatchState::new(Default::default());
     tasks.spawn(log_state(state.clone()));

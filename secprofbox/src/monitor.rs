@@ -48,18 +48,13 @@ pub async fn monitor_wpa(state: WatchState, interface: String) -> Result<(), Err
                     }
                 }
                 state.send_modify(|state| {
-                    let conn = state
-                        .connections
-                        .entry(ConnectionId {
-                            interface: interface.clone(),
-                            mac: mac.into(),
-                        })
-                        .or_default();
-                    conn.profile = keyid
-                        .as_ref()
-                        .and_then(|k| state.config.keyid_to_profile.get(k))
-                        .cloned();
+                    let id = ConnectionId {
+                        interface: interface.clone(),
+                        mac: mac.into(),
+                    };
+                    let conn = state.connections.entry(id.clone()).or_default();
                     conn.key_id = keyid;
+                    conn.update_profile(&id, &state.config);
                 });
             }
             Ok(WpaEvent::Disconnected { mac, .. }) => {
