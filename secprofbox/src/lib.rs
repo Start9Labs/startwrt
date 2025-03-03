@@ -1,5 +1,6 @@
 use tracing::subscriber::DefaultGuard;
 
+pub mod firewall;
 pub mod map;
 pub mod monitor;
 pub mod state;
