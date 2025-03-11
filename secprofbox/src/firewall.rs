@@ -118,11 +118,13 @@ pub enum RuleChange {
 }
 
 impl RuleChange {
-    pub fn iptables(&self, chain: &str) -> Command {
+    pub fn iptables(&self) -> Command {
         // should be compatable with /etc/cfg/firewall
         // https://openwrt.org/docs/guide-user/firewall/netfilter_iptables/netfilter_openwrt#fw3_and_netfilter_detailed_example
 
         let mut c = Command::new("iptables");
+        c.arg("-t");
+        c.arg("filter");
         let AllowRule {
             src_zone,
             src_ip,
@@ -139,8 +141,6 @@ impl RuleChange {
                 rule
             }
         };
-        c.arg(chain);
-        c.arg("-A");
         c.arg(src_zone.iptables_zone("forward"));
         if let Some(src_mac) = src_mac {
             c.arg("--mac-source");
@@ -183,7 +183,10 @@ fn rule_changes(a: &[AllowRule], b: &[AllowRule], mut with: impl FnMut(RuleChang
                 with(Add(b.clone()));
                 b_idx += 1;
             }
-            (Some(_), Some(_)) => (),
+            (Some(_), Some(_)) => {
+                a_idx += 1;
+                b_idx += 1;
+            }
         }
     }
 }
@@ -194,17 +197,16 @@ where
     O: Future<Output = Result<(), Error>> + Sync + Send + 'static,
 {
     let mut current_rules = Vec::new();
-    let mut new_rules = Vec::new();
     let mut join_set = JoinSet::new();
 
     loop {
+        let mut new_rules = Vec::new();
         state.peek_and_mark_seen(|state| generate_allows(state, &mut new_rules));
         new_rules.sort_unstable();
         rule_changes(&current_rules, &new_rules, |change| {
             join_set.spawn(with(change));
         });
-        current_rules.clear();
-        std::mem::swap(&mut current_rules, &mut new_rules);
+        current_rules = new_rules;
 
         while let Some(e) = join_set.join_next().await {
             e??;
@@ -215,7 +217,7 @@ where
 
 pub async fn maintain_iptables(state: WatchState) -> Result<(), Error> {
     produce_rule_changes(state, |change| async move {
-        let _status = change.iptables("secprof").spawn()?.wait().await?;
+        let _status = change.iptables().spawn()?.wait().await?;
         Ok(())
     })
     .await
