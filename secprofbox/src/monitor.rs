@@ -1,5 +1,8 @@
 use color_eyre::eyre::{bail, eyre, Context, Error};
+use futures::try_join;
+use inpt::split::Line;
 use inpt::{inpt, Inpt};
+use macaddr::MacAddr;
 use std::net::IpAddr;
 use std::path::Path;
 use std::process::Stdio;
@@ -7,37 +10,43 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::{error, info};
 
 use crate::state::{ConnectionId, WatchState};
-use crate::wpactrl::WpaCtrl;
+use crate::wpactrl::{Subscription, WpaCtrl};
 
+// note the lazy .*? here, so that we deliniate on whitespace _unless_ otherwise forced to include it
 #[derive(Inpt, Debug)]
-#[inpt(regex = r"([^ ]+)=([^ ]+)")]
+#[inpt(regex = r"([^ ]+)=(.*?[^ ]+)")]
 struct WpaEventKv<'s>(&'s str, &'s str);
 
 #[derive(Debug, Inpt)]
 enum WpaEvent<'s> {
     #[inpt(regex = r"<\d>AP-STA-CONNECTED ([A-Za-z\d:]+)")]
     Connected {
-        mac: &'s str,
+        #[inpt(from_str)]
+        mac: MacAddr,
         #[inpt(after)]
         kvs: Vec<WpaEventKv<'s>>,
     },
     #[inpt(regex = r"<\d>AP-STA-DISCONNECTED ([A-Za-z\d:]+)")]
     Disconnected {
-        mac: &'s str,
+        #[inpt(from_str)]
+        mac: MacAddr,
         #[inpt(after)]
         _kvs: Vec<WpaEventKv<'s>>,
     },
 }
 
-pub async fn monitor_wpa(state: WatchState, interface: String) -> Result<(), Error> {
-    let mut ctrl = WpaCtrl::open(Path::new("/var/run/hostapd").join(&interface))
-        .await
-        .context("openning hostapd ctrl socket")?;
-    match ctrl.request("ATTACH").await?.as_str() {
-        "OK" => info!("monitoring wifi interface={interface:?}"),
-        err => bail!("ATTACH returned {}", err),
-    }
-    let mut sub = ctrl.subscribe();
+#[derive(Debug, Inpt)]
+struct WpaStation<'s> {
+    #[inpt(from_str, split = "Line")]
+    mac: MacAddr,
+    kvs: Vec<Line<WpaEventKv<'s>>>,
+}
+
+async fn monitor_wpa_events(
+    state: WatchState,
+    interface: String,
+    mut sub: Subscription,
+) -> Result<(), Error> {
     while let Ok(msg) = sub.recv().await {
         match inpt(&msg) {
             Ok(WpaEvent::Connected { mac, kvs, .. }) => {
@@ -50,7 +59,7 @@ pub async fn monitor_wpa(state: WatchState, interface: String) -> Result<(), Err
                 state.send_modify(|state| {
                     let id = ConnectionId {
                         interface: interface.clone(),
-                        mac: mac.into(),
+                        mac,
                     };
                     let conn = state.connections.entry(id.clone()).or_default();
                     conn.key_id = keyid;
@@ -61,14 +70,65 @@ pub async fn monitor_wpa(state: WatchState, interface: String) -> Result<(), Err
                 state.send_modify(|state| {
                     state.connections.remove(&ConnectionId {
                         interface: interface.clone(),
-                        mac: mac.into(),
+                        mac,
                     });
                 });
             }
             Err(_) => (),
         }
     }
-    // NOTE: we can still send requests to ctrl, if we need to force a disconnect or something
+    Ok(())
+}
+
+async fn monitor_wpa_initial(
+    state: WatchState,
+    interface: String,
+    ctrl: &mut WpaCtrl,
+) -> Result<(), Error> {
+    let mut sta_str = ctrl.request("STA-FIRST").await?;
+    while !sta_str.trim().is_empty() {
+        let WpaStation { mac, kvs } = match inpt(&sta_str) {
+            Ok(sta) => sta,
+            Err(err) => {
+                bail!("misformatted station info from wpactrl: {err}");
+            }
+        };
+
+        let mut keyid = None;
+        for Line {
+            inner: WpaEventKv(k, v),
+        } in kvs
+        {
+            if k == "keyid" {
+                keyid = Some(v.to_string());
+            }
+        }
+        state.send_nomodify(|state| {
+            let id = ConnectionId {
+                interface: interface.clone(),
+                mac,
+            };
+            let conn = state.connections.entry(id.clone()).or_default();
+            conn.key_id = keyid;
+            conn.update_profile(&id, &state.config);
+        });
+        sta_str = ctrl.request(&format!("STA-NEXT {mac}")).await?;
+    }
+    state.mark_changed();
+    Ok(())
+}
+
+pub async fn monitor_wpa(state: WatchState, interface: String) -> Result<(), Error> {
+    let mut ctrl = WpaCtrl::open(Path::new("/var/run/hostapd").join(&interface))
+        .await
+        .context("openning hostapd ctrl socket")?;
+    match ctrl.request("ATTACH").await?.as_str() {
+        "OK" => info!("monitoring wifi interface={interface:?}"),
+        err => bail!("ATTACH returned {}", err),
+    }
+    let monitor = monitor_wpa_events(state.clone(), interface.clone(), ctrl.subscribe());
+    let initial = monitor_wpa_initial(state, interface, &mut ctrl);
+    try_join!(monitor, initial)?;
     Ok(())
 }
 
@@ -79,8 +139,8 @@ struct AddrWatchEvent<'s> {
     interface: &'s str,
     #[inpt(split = "Spaced")]
     _vlan_tag: &'s str,
-    #[inpt(split = "Spaced")]
-    eth_addr: &'s str,
+    #[inpt(split = "Spaced", from_str)]
+    eth_addr: MacAddr,
     #[inpt(split = "Spaced", from_str)]
     ip_addr: IpAddr,
     #[inpt(split = "Spaced")]
@@ -116,7 +176,7 @@ pub async fn monitor_addrwatch(state: WatchState, interfaces: Vec<String>) -> Re
                 .connections
                 .entry(ConnectionId {
                     interface: interface.into(),
-                    mac: eth_addr.into(),
+                    mac: eth_addr,
                 })
                 .or_default();
             match ip_addr {

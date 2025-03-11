@@ -60,6 +60,8 @@ pub struct WpaCtrl {
     ctrl_filepath: PathBuf,
 }
 
+pub type Subscription = Receiver<String>;
+
 static COUNTER: AtomicU64 = AtomicU64::new(1);
 
 impl WpaCtrl {
@@ -97,7 +99,7 @@ impl WpaCtrl {
         (&self.bind_filepath, &self.ctrl_filepath)
     }
 
-    pub fn subscribe(&self) -> Receiver<String> {
+    pub fn subscribe(&self) -> Subscription {
         self.inner.event_sender.subscribe()
     }
 

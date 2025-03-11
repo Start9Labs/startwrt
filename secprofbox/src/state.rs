@@ -1,3 +1,4 @@
+use macaddr::MacAddr;
 use serde::Deserialize;
 
 use crate::watchutil::Watch;
@@ -25,7 +26,7 @@ impl Connection {
 #[derive(Hash, PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
 pub struct ConnectionId {
     pub interface: String,
-    pub mac: String,
+    pub mac: MacAddr,
 }
 
 #[derive(Debug, Default)]

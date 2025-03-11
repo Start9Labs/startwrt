@@ -103,6 +103,9 @@ impl<T> Watch<T> {
             res
         })
     }
+    pub fn send_nomodify<U, F: FnOnce(&mut T) -> U>(&self, modify: F) -> U {
+        self.shared.mutate(|shared| modify(&mut shared.data))
+    }
     pub fn send_replace(&self, new: T) -> T {
         self.send_modify(|a| std::mem::replace(a, new))
     }

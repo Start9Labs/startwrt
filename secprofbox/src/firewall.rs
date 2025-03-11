@@ -1,4 +1,5 @@
 use crate::state::{Connection, ConnectionId, LanAccess, SecProfile, State};
+use macaddr::MacAddr;
 use std::net::IpAddr;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -11,7 +12,7 @@ pub enum Zone {
 pub struct AllowRule {
     pub src_zone: Zone,
     pub src_ip: Option<IpAddr>,
-    pub src_mac: Option<String>,
+    pub src_mac: Option<MacAddr>,
     pub dest_zone: Zone,
     pub dest_ip: Option<IpAddr>,
 }
@@ -19,7 +20,7 @@ pub struct AllowRule {
 pub fn generate_profile2profile_allows(
     state: &State,
     src_ip: IpAddr,
-    src_mac: &str,
+    src_mac: MacAddr,
     dst_profile: &str,
     allows: &mut Vec<AllowRule>,
 ) {
@@ -42,7 +43,7 @@ pub fn generate_profile2profile_allows(
             allows.push(AllowRule {
                 src_zone: Zone::Lan,
                 src_ip: Some(src_ip),
-                src_mac: Some(src_mac.into()),
+                src_mac: Some(src_mac),
                 dest_zone: Zone::Lan,
                 dest_ip: Some(ip),
             })
@@ -52,7 +53,7 @@ pub fn generate_profile2profile_allows(
 
 pub fn generate_allows(state: &State, allows: &mut Vec<AllowRule>) {
     for (
-        ConnectionId { mac, .. },
+        &ConnectionId { mac, .. },
         Connection {
             profile,
             ipv4,
@@ -78,7 +79,7 @@ pub fn generate_allows(state: &State, allows: &mut Vec<AllowRule>) {
                 true => allows.push(AllowRule {
                     src_zone: Zone::Lan,
                     src_ip: Some(ip),
-                    src_mac: Some(mac.clone()),
+                    src_mac: Some(mac),
                     dest_zone: Zone::Wan,
                     dest_ip: None,
                 }),
@@ -88,7 +89,7 @@ pub fn generate_allows(state: &State, allows: &mut Vec<AllowRule>) {
                 LanAccess::AllDevices => allows.push(AllowRule {
                     src_zone: Zone::Lan,
                     src_ip: Some(ip),
-                    src_mac: Some(mac.clone()),
+                    src_mac: Some(mac),
                     dest_zone: Zone::Lan,
                     dest_ip: None,
                 }),
