@@ -1,14 +1,29 @@
-use crate::state::{Connection, ConnectionId, LanAccess, SecProfile, State};
+use crate::state::{Connection, ConnectionId, LanAccess, SecProfile, State, WatchState};
+use color_eyre::eyre::Error;
 use macaddr::MacAddr;
-use std::net::IpAddr;
+use std::{future::Future, net::IpAddr};
+use tokio::{process::Command, task::JoinSet};
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
 pub enum Zone {
     Lan,
     Wan,
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+impl Zone {
+    pub fn iptables_zone(self, postfix: &str) -> String {
+        format!(
+            "zone_{}_{}",
+            match self {
+                Zone::Lan => "lan",
+                Zone::Wan => "wan",
+            },
+            postfix
+        )
+    }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
 pub struct AllowRule {
     pub src_zone: Zone,
     pub src_ip: Option<IpAddr>,
@@ -35,13 +50,21 @@ pub fn generate_profile2profile_allows(
             continue;
         }
 
-        for &ip in ips {
+        for &dest_ip in ips {
+            match (src_ip, dest_ip) {
+                (IpAddr::V4(_), IpAddr::V4(_)) => (),
+                // TODO: allow lan connections between v6 addrs?
+                (IpAddr::V6(_), IpAddr::V6(_)) => continue,
+                // v6<->v4 doesn't make any sense
+                _ => continue,
+            }
+
             allows.push(AllowRule {
                 src_zone: Zone::Lan,
                 src_ip: Some(src_ip),
                 src_mac: Some(src_mac),
                 dest_zone: Zone::Lan,
-                dest_ip: Some(ip),
+                dest_ip: Some(dest_ip),
             })
         }
     }
@@ -86,4 +109,114 @@ pub fn generate_allows(state: &State, allows: &mut Vec<AllowRule>) {
             }
         }
     }
+}
+
+#[derive(Debug)]
+pub enum RuleChange {
+    Add(AllowRule),
+    Delete(AllowRule),
+}
+
+impl RuleChange {
+    pub fn iptables(&self, chain: &str) -> Command {
+        // should be compatable with /etc/cfg/firewall
+        // https://openwrt.org/docs/guide-user/firewall/netfilter_iptables/netfilter_openwrt#fw3_and_netfilter_detailed_example
+
+        let mut c = Command::new("iptables");
+        let AllowRule {
+            src_zone,
+            src_ip,
+            src_mac,
+            dest_zone,
+            dest_ip,
+        } = match self {
+            RuleChange::Add(rule) => {
+                c.arg("-A");
+                rule
+            }
+            RuleChange::Delete(rule) => {
+                c.arg("-D");
+                rule
+            }
+        };
+        c.arg(chain);
+        c.arg("-A");
+        c.arg(src_zone.iptables_zone("forward"));
+        if let Some(src_mac) = src_mac {
+            c.arg("--mac-source");
+            c.arg(src_mac.to_string());
+        }
+        if let Some(src_ip) = src_ip {
+            c.arg("-s");
+            c.arg(src_ip.to_string());
+        }
+        if let Some(dest_ip) = dest_ip {
+            c.arg("-d");
+            c.arg(dest_ip.to_string());
+        }
+        c.arg("-j");
+        c.arg(dest_zone.iptables_zone("dest_ACCEPT"));
+        c
+    }
+}
+
+fn rule_changes(a: &[AllowRule], b: &[AllowRule], mut with: impl FnMut(RuleChange)) {
+    use RuleChange::*;
+    let mut a_idx = 0;
+    let mut b_idx = 0;
+    loop {
+        match (a.get(a_idx), b.get(b_idx)) {
+            (None, None) => break,
+            (Some(a), None) => {
+                with(Delete(a.clone()));
+                a_idx += 1;
+            }
+            (None, Some(b)) => {
+                with(Add(b.clone()));
+                b_idx += 1;
+            }
+            (Some(a), Some(b)) if a < b => {
+                with(Delete(a.clone()));
+                a_idx += 1;
+            }
+            (Some(a), Some(b)) if a > b => {
+                with(Add(b.clone()));
+                b_idx += 1;
+            }
+            (Some(_), Some(_)) => (),
+        }
+    }
+}
+
+pub async fn produce_rule_changes<F, O>(mut state: WatchState, mut with: F) -> Result<(), Error>
+where
+    F: FnMut(RuleChange) -> O,
+    O: Future<Output = Result<(), Error>> + Sync + Send + 'static,
+{
+    let mut current_rules = Vec::new();
+    let mut new_rules = Vec::new();
+    let mut join_set = JoinSet::new();
+
+    loop {
+        state.peek_and_mark_seen(|state| generate_allows(state, &mut new_rules));
+        new_rules.sort_unstable();
+        rule_changes(&current_rules, &new_rules, |change| {
+            join_set.spawn(with(change));
+        });
+        current_rules.clear();
+        std::mem::swap(&mut current_rules, &mut new_rules);
+
+        while let Some(e) = join_set.join_next().await {
+            e??;
+        }
+        state.changed().await;
+    }
+}
+
+pub async fn maintain_iptables(state: WatchState) -> Result<(), Error> {
+    produce_rule_changes(state, |change| async move {
+        let _status = change.iptables("secprof").spawn()?.wait().await?;
+        Ok(())
+    })
+    .await
 }

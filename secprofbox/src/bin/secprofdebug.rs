@@ -1,5 +1,5 @@
 use color_eyre::eyre::Error;
-use secprofbox::firewall::generate_allows;
+use secprofbox::firewall::produce_rule_changes;
 use secprofbox::monitor::{monitor_addrwatch, monitor_wpa};
 use secprofbox::state::{LanAccess, SecProfile, State};
 use secprofbox::{init_logging, state::WatchState};
@@ -16,16 +16,12 @@ pub async fn log_state(mut state: WatchState) -> Result<(), Error> {
     Ok(())
 }
 
-pub async fn log_firewall(mut state: WatchState) -> Result<(), Error> {
-    state
-        .wait_for(|state| {
-            let mut allows = Vec::new();
-            generate_allows(state, &mut allows);
-            allows.sort();
-            println!("ALLOW={:#?}", allows);
-            false
-        })
-        .await;
+pub async fn log_firewall(state: WatchState) -> Result<(), Error> {
+    produce_rule_changes(state, |change| async move {
+        println!("iptables {:?}", change.iptables("secprof"),);
+        Ok(())
+    })
+    .await?;
     Ok(())
 }
 
