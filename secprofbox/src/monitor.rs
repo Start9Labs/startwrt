@@ -1,6 +1,6 @@
 use color_eyre::eyre::{bail, eyre, Context, Error};
 use futures::try_join;
-use inpt::split::Line;
+use inpt::split::{Line, Spaced};
 use inpt::{inpt, Inpt};
 use macaddr::MacAddr;
 use std::net::IpAddr;
@@ -12,9 +12,8 @@ use tracing::{error, info};
 use crate::state::{ConnectionId, WatchState};
 use crate::wpactrl::{Subscription, WpaCtrl};
 
-// note the lazy .*? here, so that we deliniate on whitespace _unless_ otherwise forced to include it
 #[derive(Inpt, Debug)]
-#[inpt(regex = r"([^ ]+)=(.*?[^ ]+)")]
+#[inpt(regex = r"([^ ]+)=(.+)")]
 struct WpaEventKv<'s>(&'s str, &'s str);
 
 #[derive(Debug, Inpt)]
@@ -24,14 +23,14 @@ enum WpaEvent<'s> {
         #[inpt(from_str)]
         mac: MacAddr,
         #[inpt(after)]
-        kvs: Vec<WpaEventKv<'s>>,
+        kvs: Vec<Spaced<WpaEventKv<'s>>>,
     },
     #[inpt(regex = r"<\d>AP-STA-DISCONNECTED ([A-Za-z\d:]+)")]
     Disconnected {
         #[inpt(from_str)]
         mac: MacAddr,
         #[inpt(after)]
-        _kvs: Vec<WpaEventKv<'s>>,
+        _kvs: Vec<Spaced<WpaEventKv<'s>>>,
     },
 }
 
@@ -51,7 +50,10 @@ async fn monitor_wpa_events(
         match inpt(&msg) {
             Ok(WpaEvent::Connected { mac, kvs, .. }) => {
                 let mut keyid = None;
-                for WpaEventKv(k, v) in kvs {
+                for Spaced {
+                    inner: WpaEventKv(k, v),
+                } in kvs
+                {
                     if k == "keyid" {
                         keyid = Some(v.to_string());
                     }
@@ -64,6 +66,10 @@ async fn monitor_wpa_events(
                     let conn = state.connections.entry(id.clone()).or_default();
                     conn.key_id = keyid;
                     conn.update_profile(&id, &state.config);
+                    // it would be nice to clear out previously assigned ips here in case
+                    // we never got a disconnect event from the last device. but we can't really
+                    // do that because we have no guarenteed ordering vs addrwatch. there is a
+                    // chance we saw the ip address get assigned first
                 });
             }
             Ok(WpaEvent::Disconnected { mac, .. }) => {
@@ -73,6 +79,8 @@ async fn monitor_wpa_events(
                         mac,
                     });
                 });
+                // technically a race condition if we observe disconnect,connect,addr as addr,disconnect,connnect
+                // but the reconnect would have to happen very fast
             }
             Err(_) => (),
         }
@@ -172,6 +180,11 @@ pub async fn monitor_addrwatch(state: WatchState, interfaces: Vec<String>) -> Re
         };
 
         state.send_modify(|state| {
+            // TODO: more efficent way to unassign?
+            for conn in state.connections.values_mut() {
+                conn.ips.remove(&ip_addr);
+            }
+
             let conn = state
                 .connections
                 .entry(ConnectionId {
@@ -179,10 +192,7 @@ pub async fn monitor_addrwatch(state: WatchState, interfaces: Vec<String>) -> Re
                     mac: eth_addr,
                 })
                 .or_default();
-            match ip_addr {
-                IpAddr::V4(ipv4) => conn.ipv4 = Some(ipv4),
-                IpAddr::V6(ipv6) => conn.ipv6 = Some(ipv6),
-            }
+            conn.ips.insert(ip_addr);
         });
     }
 

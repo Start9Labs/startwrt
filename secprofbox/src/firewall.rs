@@ -24,22 +24,18 @@ pub fn generate_profile2profile_allows(
     dst_profile: &str,
     allows: &mut Vec<AllowRule>,
 ) {
-    for Connection {
-        profile,
-        ipv4,
-        ipv6,
-        ..
-    } in state.connections.values()
-    {
+    for (id, Connection { profile, ips, .. }) in &state.connections {
+        if id.mac == src_mac {
+            // don't explicitly need to allow lan connections from a device to itself
+            // TODO: is this true?
+            continue;
+        }
+
         if profile.as_deref() != Some(dst_profile) {
             continue;
         }
 
-        let ips = [ipv4.map(IpAddr::from), ipv6.map(IpAddr::from)]
-            .into_iter()
-            .flatten();
-
-        for ip in ips {
+        for &ip in ips {
             allows.push(AllowRule {
                 src_zone: Zone::Lan,
                 src_ip: Some(src_ip),
@@ -52,28 +48,16 @@ pub fn generate_profile2profile_allows(
 }
 
 pub fn generate_allows(state: &State, allows: &mut Vec<AllowRule>) {
-    for (
-        &ConnectionId { mac, .. },
-        Connection {
-            profile,
-            ipv4,
-            ipv6,
-            ..
-        },
-    ) in state.connections.iter()
-    {
+    for (&ConnectionId { mac, .. }, Connection { profile, ips, .. }) in state.connections.iter() {
         // TODO: use a zone for interface profiles, instead of doing the ip<->ip thing
 
         let Some(profile) = profile else { continue };
-        let ips = [ipv4.map(IpAddr::from), ipv6.map(IpAddr::from)]
-            .into_iter()
-            .flatten();
 
         let Some(SecProfile { lan, wan }) = state.config.profiles.get(profile) else {
             continue;
         };
 
-        for ip in ips {
+        for &ip in ips {
             match wan {
                 false => (),
                 true => allows.push(AllowRule {

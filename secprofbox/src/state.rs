@@ -2,14 +2,14 @@ use macaddr::MacAddr;
 use serde::Deserialize;
 
 use crate::watchutil::Watch;
-use std::{collections::HashMap, net::Ipv4Addr, net::Ipv6Addr};
+use std::collections::{BTreeSet, HashMap};
+use std::net::IpAddr;
 
 #[derive(Debug, Default)]
 pub struct Connection {
     pub key_id: Option<String>,
     pub profile: Option<String>,
-    pub ipv4: Option<Ipv4Addr>,
-    pub ipv6: Option<Ipv6Addr>,
+    pub ips: BTreeSet<IpAddr>,
 }
 
 impl Connection {
