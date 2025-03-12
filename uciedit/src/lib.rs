@@ -18,6 +18,20 @@ pub fn parse_config_string(config: &str) -> Result<Lines<'_>, Error> {
     config.lines().map(Line::parse).collect()
 }
 
+pub fn rewrite_sections(
+    path: impl AsRef<Path>,
+    each: impl for<'a> FnMut(MutSectionCtx) -> Result<(), Error>,
+) -> Result<(), Error> {
+    rewrite_config(path, |lines, arena| each_section(lines, arena, each))
+}
+
+pub fn rewrite_sections_string(
+    config: String,
+    each: impl for<'a> FnMut(MutSectionCtx) -> Result<(), Error>,
+) -> Result<String, Error> {
+    rewrite_config_string(config, |lines, arena| each_section(lines, arena, each))
+}
+
 /// TODO: async version?
 pub fn rewrite_config<V>(
     path: impl AsRef<Path>,
@@ -68,24 +82,10 @@ pub fn rewrite_config_string(
     Ok(writer)
 }
 
-pub fn rewrite_sections(
-    path: impl AsRef<Path>,
-    each: impl for<'a> FnMut(MutSectionCtx) -> Result<bool, Error>,
-) -> Result<(), Error> {
-    rewrite_config(path, |lines, arena| each_section(lines, arena, each))
-}
-
-pub fn rewrite_sections_string(
-    config: String,
-    each: impl for<'a> FnMut(MutSectionCtx) -> Result<bool, Error>,
-) -> Result<String, Error> {
-    rewrite_config_string(config, |lines, arena| each_section(lines, arena, each))
-}
-
 pub fn each_section<'a>(
     lines: &mut Lines<'a>,
     arena: &'a Arena,
-    mut each: impl FnMut(MutSectionCtx) -> Result<bool, Error>,
+    mut each: impl FnMut(MutSectionCtx) -> Result<(), Error>,
 ) -> Result<(), Error> {
     let mut index = 0;
     let mut first_index = 0;
@@ -107,11 +107,14 @@ pub fn each_section<'a>(
                 continue;
             }
         };
-        if each(MutSectionCtx {
+        let mut retain = true;
+        each(MutSectionCtx {
             lines,
             arena,
             index,
-        })? {
+            retain: &mut retain,
+        })?;
+        if retain {
             // Retain the section and move on
             index += 1;
         } else {
@@ -139,9 +142,10 @@ pub struct MutSectionCtx<'a, 'l> {
     pub lines: &'l mut Lines<'a>,
     pub arena: &'a Arena,
     pub index: usize,
+    retain: &'l mut bool,
 }
 
-impl MutSectionCtx<'_, '_> {
+impl<'a> MutSectionCtx<'a, '_> {
     pub fn ty(&self) -> Cow<str> {
         if let Line::Section { ty, .. } = &self.lines[self.index] {
             return ty.as_str();
@@ -154,6 +158,22 @@ impl MutSectionCtx<'_, '_> {
             return name.as_ref().map(|n| n.as_str());
         }
         panic!("section ctx not at a section")
+    }
+
+    pub fn get<S: UciSection<'a>>(&self) -> Result<S, Error> {
+        S::read(self.lines, self.index)
+    }
+
+    pub fn set<S: UciSection<'a>>(&mut self, section: S) -> Result<(), Error> {
+        section.write(self.lines, self.arena, self.index)
+    }
+
+    pub fn remove(&mut self) {
+        *self.retain = true;
+    }
+
+    pub fn set_retain(&mut self, retain: bool) {
+        *self.retain = retain;
     }
 }
 
@@ -464,16 +484,15 @@ config other
         few: Vec<i32>,
     }
 
-    let edited = rewrite_sections_string(original.to_string(), |ctx| {
-        let _ = Bar {
+    let edited = rewrite_sections_string(original.to_string(), |mut ctx| {
+        let _ = ctx.set(Bar {
             always: 0,
             yes: Some(1),
             no: None,
             many: vec![2, 3, 4],
             few: vec![5],
-        }
-        .write(ctx.lines, ctx.arena, ctx.index);
-        Ok(true)
+        });
+        Ok(())
     })
     .unwrap();
 
@@ -519,8 +538,11 @@ config retain
     # comment 4
 ";
 
-    let edited =
-        rewrite_sections_string(original.to_string(), |ctx| Ok(ctx.ty() == "retain")).unwrap();
+    let edited = rewrite_sections_string(original.to_string(), |mut ctx| {
+        ctx.set_retain(ctx.ty() == "retain");
+        Ok(())
+    })
+    .unwrap();
 
     println!("===Original==={original}===Edited==={edited}===Expected==={expected}=====");
     assert_eq!(edited.replace("\t", "    "), expected);
