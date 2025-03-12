@@ -68,6 +68,68 @@ pub fn rewrite_config_string(
     Ok(writer)
 }
 
+pub fn rewrite_sections(
+    path: impl AsRef<Path>,
+    each: impl for<'a> FnMut(
+        &mut Lines<'a>,
+        &'a Arena,
+        usize,
+        &str,
+        Option<&str>,
+    ) -> Result<bool, Error>,
+) -> Result<(), Error> {
+    rewrite_config(path, |lines, arena| each_section(lines, arena, each))
+}
+
+pub fn rewrite_sections_string(
+    config: String,
+    each: impl for<'a> FnMut(
+        &mut Lines<'a>,
+        &'a Arena,
+        usize,
+        &str,
+        Option<&str>,
+    ) -> Result<bool, Error>,
+) -> Result<String, Error> {
+    rewrite_config_string(config, |lines, arena| each_section(lines, arena, each))
+}
+
+pub fn each_section<'a>(
+    lines: &mut Lines<'a>,
+    arena: &'a Arena,
+    mut each: impl FnMut(&mut Lines<'a>, &'a Arena, usize, &str, Option<&str>) -> Result<bool, Error>,
+) -> Result<(), Error> {
+    let mut index = 0;
+    while let Some(line) = lines.get(index) {
+        let (ty, name) = if let Line::Section { ty, name } = line {
+            (
+                ty.as_str().into_owned(),
+                name.map(|n| n.as_str().into_owned()),
+            )
+        } else {
+            index += 1;
+            continue;
+        };
+        if each(lines, arena, index, &ty, name.as_deref())? {
+            // Retain the section and move on
+            index += 1;
+        } else {
+            // Remove the section
+            let mut last_index = index + 1;
+            for i in last_index..lines.len() {
+                if matches!(lines[i], Line::Section { .. }) {
+                    break;
+                }
+                if lines[i].is_in_section() {
+                    last_index = i;
+                }
+            }
+            lines.splice(index..=last_index, []);
+        }
+    }
+    Ok(())
+}
+
 pub type Lines<'a> = Vec<Line<'a>>;
 pub type Arena = typed_arena::Arena<String>;
 
@@ -84,7 +146,10 @@ pub trait UciSection<'a>: Sized {
 
 pub enum Line<'a> {
     Empty,
-    Comment(&'a str),
+    Comment {
+        indent: bool,
+        text: &'a str,
+    },
     Section {
         ty: Token<'a>,
         name: Option<Token<'a>>,
@@ -104,7 +169,11 @@ impl fmt::Display for Line<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Line::Empty => writeln!(f),
-            Line::Comment(text) => writeln!(f, "{}", text),
+            Line::Comment {
+                indent: false,
+                text,
+            } => writeln!(f, "#{}", text),
+            Line::Comment { indent: true, text } => writeln!(f, "\t#{}", text),
             Line::Section { ty, name: None } => writeln!(f, "config {}", ty),
             Line::Section {
                 ty,
@@ -123,8 +192,11 @@ impl<'a> Line<'a> {
         if rest.is_empty() {
             return Ok(Line::Empty);
         }
-        if rest.starts_with('#') {
-            return Ok(Line::Comment(line));
+        if let Some(rest) = rest.strip_prefix('#') {
+            return Ok(Line::Comment {
+                indent: line.starts_with(char::is_whitespace),
+                text: rest,
+            });
         }
         let InptStep {
             data: Ok(keyword),
@@ -161,6 +233,13 @@ impl<'a> Line<'a> {
             }
             kw => bail!("unknown UCI keyword {kw:?}"),
         })
+    }
+
+    pub fn is_in_section(&self) -> bool {
+        matches!(
+            self,
+            Line::Comment { indent: true, .. } | Line::Option { .. } | Line::List { .. }
+        )
     }
 }
 
@@ -338,12 +417,12 @@ config bar named
 
     # few comment
     list few 5
-    option yes 1
-    list many 3
-    list many 4
 
     # ignored comment
     option ignored 6
+    option yes 1
+    list many 3
+    list many 4
 
 # bottom comment
 ";
@@ -368,6 +447,56 @@ config bar named
         .write(lines, arena, 2)
     })
     .unwrap();
+
+    println!("===Original==={original}===Edited==={edited}===Expected==={expected}=====");
+    assert_eq!(edited.replace("\t", "    "), expected);
+}
+
+#[test]
+fn test_remove_sections() {
+    let original = r"
+# section 1
+config retain
+    option foo bar
+    # comment 1
+    
+# section 2
+config remove
+    option foo bar
+    # comment 2
+
+# section 3
+config remove
+    option foo bar
+    # comment 3
+
+# section 4
+config retain
+    option foo bar
+    # comment 4
+";
+
+    let expected = r"
+# section 1
+config retain
+    option foo bar
+    # comment 1
+
+# section 2
+
+# section 3
+
+# section 4
+config retain
+    option foo bar
+    # comment 4
+";
+
+    let edited =
+        rewrite_sections_string(original.to_string(), |_lines, _arena, _index, ty, _name| {
+            Ok(ty == "retain")
+        })
+        .unwrap();
 
     println!("===Original==={original}===Edited==={edited}===Expected==={expected}=====");
     assert_eq!(edited.replace("\t", "    "), expected);

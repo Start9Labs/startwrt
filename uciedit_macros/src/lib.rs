@@ -184,12 +184,15 @@ fn write_body(fields: &[UciField], _struc: Ident, ty: String, crat: Path) -> Tok
 
         #(#decl)*
 
-        let mut insert_at = index + 1;
+        let mut insert_after = index;
         loop {
             index += 1;
             let Some(line) = lines.get_mut(index) else {
                 break;
             };
+            if line.is_in_section() {
+                insert_after = index;
+            }
             *line = match line {
                 #crat::Line::Option { option, .. } => match &*option.as_str() {
                     #(#option_arm)*
@@ -203,11 +206,11 @@ fn write_body(fields: &[UciField], _struc: Ident, ty: String, crat: Path) -> Tok
                 _ => continue,
             }
             .unwrap_or(#crat::Line::Skip);
-            insert_at = index + 1;
+            insert_after = index;
         }
 
         lines.splice(
-            insert_at..insert_at,
+            insert_after+1..insert_after+1,
             #chain,
         );
 
