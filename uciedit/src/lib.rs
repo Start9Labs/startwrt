@@ -1,6 +1,7 @@
 pub use eyre::{bail, eyre as error, Error};
+pub use inpt::inpt;
 use inpt::split::{Quoted, SingleQuoted, Word};
-use inpt::{inpt, inpt_step, Inpt, InptStep};
+use inpt::{inpt_step, Inpt, InptStep};
 use std::io::{BufRead, BufWriter};
 use std::{borrow::Cow, fs::File, path::Path};
 use std::{fmt, fs};

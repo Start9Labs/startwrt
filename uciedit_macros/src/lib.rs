@@ -15,6 +15,7 @@ struct UciField {
     name: String,
     is_opt: bool,
     is_vec: bool,
+    is_inpt: bool,
     crat: Path,
 }
 
@@ -33,10 +34,19 @@ impl UciField {
             return TokenStream::new();
         }
         let UciField {
-            placehold, name, ..
+            placehold,
+            name,
+            crat,
+            ..
         } = self;
-        quote! {
-            #name if #placehold.is_none() => #placehold = Some(std::str::FromStr::from_str(&value.as_str())?),
+        if self.is_inpt {
+            quote! {
+                #name if #placehold.is_none() => #placehold = Some(#crat::inpt(&value.as_str()).map_err(|e| #crat::error!("{e}"))?),
+            }
+        } else {
+            quote! {
+                #name if #placehold.is_none() => #placehold = Some(std::str::FromStr::from_str(&value.as_str())?),
+            }
         }
     }
 
@@ -45,10 +55,19 @@ impl UciField {
             return TokenStream::new();
         }
         let UciField {
-            placehold, name, ..
+            placehold,
+            name,
+            crat,
+            ..
         } = self;
-        quote! {
-            #name => #placehold.push(std::str::FromStr::from_str(&item.as_str())?),
+        if self.is_inpt {
+            quote! {
+                #name => #placehold.push(#crat::inpt(&item.as_str()).map_err(|e| #crat::error!("{e}"))?),
+            }
+        } else {
+            quote! {
+                #name => #placehold.push(std::str::FromStr::from_str(&item.as_str())?),
+            }
         }
     }
 
@@ -142,7 +161,7 @@ fn read_body(fields: &[UciField], struc: Ident, _ty: String, crat: Path) -> Toke
     let init = fields.iter().map(UciField::read_init);
     quote! {
         let Some(#crat::Line::Section { .. }) = lines.get(index) else {
-            bail!("line {index} does not start a section")
+            #crat::bail!("line {index} does not start a section")
         };
         #(#decl)*
 
@@ -176,10 +195,10 @@ fn write_body(fields: &[UciField], _struc: Ident, ty: String, crat: Path) -> Tok
     let not_section_err = format!("line {{index}} is not a {ty} section");
     quote! {
         let Some(#crat::Line::Section { ty, .. }) = lines.get(index) else {
-            bail!("line {index} does not start a section")
+            #crat::bail!("line {index} does not start a section")
         };
         if ty.as_str() != #ty {
-            bail!(#not_section_err)
+            #crat::bail!(#not_section_err)
         }
 
         #(#decl)*
@@ -277,6 +296,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                 name: i.to_string(),
                 is_opt: is_collection_with_generic(&f.ty, "Option"),
                 is_vec: is_collection_with_generic(&f.ty, "Vec"),
+                is_inpt: true,
                 crat: crat.clone(),
             }
         })

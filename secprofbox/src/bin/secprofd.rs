@@ -1,6 +1,6 @@
 use secprofbox::firewall::maintain_iptables;
 use secprofbox::monitor::{monitor_addrwatch, monitor_wpa};
-use secprofbox::state::{LanAccess, SecProfile, State};
+use secprofbox::state::{load_config, State};
 use secprofbox::{init_logging, state::WatchState};
 use tokio::task::JoinSet;
 use tracing::error;
@@ -10,39 +10,14 @@ pub async fn main() {
     let _logging = init_logging("secprofdebug");
     let mut tasks = JoinSet::new();
     let mut state = State::default();
-    state.config.profiles.insert(
-        "default".into(),
-        SecProfile {
-            lan: LanAccess::AllDevices,
-            wan: true,
-        },
-    );
-    state.config.profiles.insert(
-        "guest".into(),
-        SecProfile {
-            lan: LanAccess::NoDevices,
-            wan: true,
-        },
-    );
-    state.config.profiles.insert(
-        "foo".into(),
-        SecProfile {
-            lan: LanAccess::OtherProfile(vec!["foo".into()]),
-            wan: true,
-        },
-    );
-    state
-        .config
-        .keyid_to_profile
-        .insert("guest".into(), "guest".into());
-    state
-        .config
-        .keyid_to_profile
-        .insert("foo".into(), "foo".into());
-    state
-        .config
-        .keyid_to_profile
-        .insert("default".into(), "default".into());
+    match load_config() {
+        Ok(cfg) => state.config = cfg,
+        Err(err) => {
+            println!("could not read /etc/config/secprof: {:?}", err);
+            error!("could not read /etc/config/secprof: {:?}", err);
+            return;
+        }
+    }
     let state = WatchState::new(state);
 
     tasks.spawn(maintain_iptables(state.clone()));

@@ -1,7 +1,7 @@
+use crate::watchutil::Watch;
+use color_eyre::eyre::{bail, Error};
 use macaddr::MacAddr;
 use serde::Deserialize;
-
-use crate::watchutil::Watch;
 use std::collections::{BTreeSet, HashMap};
 use std::net::IpAddr;
 
@@ -64,4 +64,63 @@ pub fn set_config(state: &WatchState, config: Config) {
             conn.update_profile(id, &state.config);
         }
     });
+}
+
+use uciedit::{rewrite_sections, UciSection};
+
+#[derive(UciSection)]
+#[uci(ty = "profile")]
+pub struct UciSecProfile {
+    lan_acces: u8,
+    wan_acces: u8,
+    lan_whitelist: Option<String>,
+}
+
+#[derive(UciSection, Debug, Clone)]
+#[uci(ty = "wpapassword")]
+pub struct WpaPassword {
+    password: String,
+    profile: String,
+}
+
+pub fn load_config() -> Result<Config, Error> {
+    let mut config = Config::default();
+    // TODO: use read_sections instead of rewrite_sections (once implemented)
+    rewrite_sections("/etc/config/secprof", |ctx| {
+        if let Ok(UciSecProfile {
+            lan_acces,
+            wan_acces,
+            lan_whitelist,
+        }) = ctx.get()
+        {
+            let Some(name) = ctx.name() else {
+                bail!("all security profiles must be named")
+            };
+            config.profiles.insert(
+                name.into_owned(),
+                SecProfile {
+                    lan: if lan_acces > 0 {
+                        LanAccess::AllDevices
+                    } else if let Some(whitelist) = lan_whitelist {
+                        LanAccess::OtherProfile(
+                            whitelist.split(',').map(|s| s.to_owned()).collect(),
+                        )
+                    } else {
+                        LanAccess::NoDevices
+                    },
+                    wan: wan_acces > 0,
+                },
+            );
+        }
+        if let Ok(WpaPassword { password, profile }) = ctx.get() {
+            let Some(name) = ctx.name() else {
+                bail!("all wpa passwords must be named")
+            };
+            let name = name.into_owned();
+            config.keyid_to_profile.insert(name.clone(), profile);
+            // TODO: save the password and reload the wpa service
+        }
+        Ok(())
+    })?;
+    Ok(config)
 }
