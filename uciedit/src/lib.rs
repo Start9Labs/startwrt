@@ -232,9 +232,8 @@ impl<'a> SectionsMut<'_, 'a> {
                 self.index += 1;
             } else {
                 // Remove the section
-                let mut last_index = self.index + 1;
-                let search_range = last_index..self.lines.len();
-                for i in search_range {
+                let mut last_index = self.index;
+                for i in self.index + 1..self.lines.len() {
                     if matches!(self.lines[i], Line::Section { .. }) {
                         break;
                     }
@@ -636,6 +635,10 @@ config remove
 config retain
     option foo bar
     # comment 4
+
+# section 5
+config remove
+config retain
 ";
 
     let expected = r"
@@ -650,6 +653,8 @@ config retain
 config retain
     option foo bar
     # comment 4
+
+config retain
 ";
 
     let edited = rewrite_config_string(original.to_string(), |mut ctx| {
