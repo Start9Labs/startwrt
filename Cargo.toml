@@ -1,3 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["secprofbox", "uciedit", "uciedit_macros"]
+
+[workspace.dependencies]
+uciedit = { path = "uciedit" }
+uciedit_macros = { path = "uciedit_macros" }
+secprofbox = { path = "secprofbox" }

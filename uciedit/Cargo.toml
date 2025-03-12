@@ -8,3 +8,5 @@ eyre = "0.6.12"
 inpt = "0.1.4"
 fd-lock-rs = "0.1.4"
 bumpalo = "3.17"
+typed-arena = "2.0.2"
+uciedit_macros = { workspace = true }
