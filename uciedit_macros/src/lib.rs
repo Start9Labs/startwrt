@@ -296,7 +296,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                 name: i.to_string(),
                 is_opt: is_collection_with_generic(&f.ty, "Option"),
                 is_vec: is_collection_with_generic(&f.ty, "Vec"),
-                is_inpt: true,
+                is_inpt: false,
                 crat: crat.clone(),
             }
         })

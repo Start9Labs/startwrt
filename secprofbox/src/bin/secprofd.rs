@@ -1,6 +1,6 @@
-use secprofbox::firewall::maintain_iptables;
+use secprofbox::firewall::{maintain_iptables, write_basic_firewall_config};
 use secprofbox::monitor::{monitor_addrwatch, monitor_wpa};
-use secprofbox::state::{load_config, State};
+use secprofbox::state::{load_config, reload_config_sighup, State};
 use secprofbox::{init_logging, state::WatchState};
 use tokio::task::JoinSet;
 use tracing::error;
@@ -13,13 +13,17 @@ pub async fn main() {
     match load_config() {
         Ok(cfg) => state.config = cfg,
         Err(err) => {
-            println!("could not read /etc/config/secprof: {:?}", err);
-            error!("could not read /etc/config/secprof: {:?}", err);
+            println!("{:?}", err);
+            error!("{:?}", err);
             return;
         }
     }
-    let state = WatchState::new(state);
+    if let Err(err) = write_basic_firewall_config(&state.config).await {
+        error!("could not ensure /etc/config/firewall is up to date: {err}");
+    }
 
+    let state = WatchState::new(state);
+    tasks.spawn(reload_config_sighup(state.clone()));
     tasks.spawn(maintain_iptables(state.clone()));
     tasks.spawn(monitor_wpa(state.clone(), "phy0-ap0".into()));
     tasks.spawn(monitor_addrwatch(state.clone(), vec!["phy0-ap0".into()]));

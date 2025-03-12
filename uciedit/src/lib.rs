@@ -1,42 +1,40 @@
+use eyre::Context;
 pub use eyre::{bail, eyre as error, Error};
 pub use inpt::inpt;
 use inpt::split::{Quoted, SingleQuoted, Word};
 use inpt::{inpt_step, Inpt, InptStep};
+use std::fmt::Display;
 use std::io::{BufRead, BufWriter};
 use std::{borrow::Cow, fs::File, path::Path};
 use std::{fmt, fs};
 pub use uciedit_macros::UciSection;
 
+pub mod openwrt;
+
 pub fn parse_config<V>(
     path: impl AsRef<Path>,
-    with: impl FnOnce(Lines<'_>) -> Result<V, Error>,
+    with: impl FnOnce(Sections) -> Result<V, Error>,
 ) -> Result<V, Error> {
     let text = fs::read_to_string(path)?;
-    with(parse_config_string(&text)?)
+    parse_config_string(&text, with)
 }
 
-pub fn parse_config_string(config: &str) -> Result<Lines<'_>, Error> {
-    config.lines().map(Line::parse).collect()
-}
-
-pub fn rewrite_sections(
-    path: impl AsRef<Path>,
-    each: impl for<'a> FnMut(MutSectionCtx) -> Result<(), Error>,
-) -> Result<(), Error> {
-    rewrite_config(path, |lines, arena| each_section(lines, arena, each))
-}
-
-pub fn rewrite_sections_string(
-    config: String,
-    each: impl for<'a> FnMut(MutSectionCtx) -> Result<(), Error>,
-) -> Result<String, Error> {
-    rewrite_config_string(config, |lines, arena| each_section(lines, arena, each))
+pub fn parse_config_string<V>(
+    config: &str,
+    with: impl FnOnce(Sections) -> Result<V, Error>,
+) -> Result<V, Error> {
+    let lines = config.lines().map(Line::parse).collect::<Result<_, _>>()?;
+    with(Sections {
+        lines: &lines,
+        index: 0,
+        started: false,
+    })
 }
 
 /// TODO: async version?
 pub fn rewrite_config<V>(
     path: impl AsRef<Path>,
-    with: impl for<'a> FnOnce(&mut Lines<'a>, &'a Arena) -> Result<V, Error>,
+    with: impl for<'a> FnOnce(SectionsMut) -> Result<V, Error>,
 ) -> Result<V, Error> {
     use std::io::Write;
 
@@ -53,9 +51,17 @@ pub fn rewrite_config<V>(
     let arena = Arena::new();
     for line in BufReader::new(&mut *locked).lines() {
         let line = arena.alloc(line?);
-        lines.push(Line::parse(line)?);
+        let parse =
+            Line::parse(line).with_context(|| format!("syntax error on line {}", lines.len()))?;
+        lines.push(parse);
     }
-    let v = with(&mut lines, &arena)?;
+    let v = with(SectionsMut {
+        lines: &mut lines,
+        index: 0,
+        arena: &arena,
+        section_start: None,
+        retain: true,
+    })?;
     locked.set_len(0)?;
     let mut writer = BufWriter::new(&mut *locked);
     for line in lines {
@@ -66,7 +72,7 @@ pub fn rewrite_config<V>(
 
 pub fn rewrite_config_string(
     config: String,
-    with: impl for<'a> FnOnce(&mut Lines<'a>, &'a Arena) -> Result<(), Error>,
+    with: impl for<'a> FnOnce(SectionsMut) -> Result<(), Error>,
 ) -> Result<String, Error> {
     use std::fmt::Write;
 
@@ -75,7 +81,13 @@ pub fn rewrite_config_string(
     for line in arena.alloc(config).lines() {
         lines.push(Line::parse(line)?);
     }
-    with(&mut lines, &arena)?;
+    with(SectionsMut {
+        lines: &mut lines,
+        index: 0,
+        arena: &arena,
+        section_start: None,
+        retain: true,
+    })?;
     let mut writer = String::new();
     for line in lines {
         write!(writer, "{}", line)?;
@@ -83,71 +95,20 @@ pub fn rewrite_config_string(
     Ok(writer)
 }
 
-pub fn each_section<'a>(
-    lines: &mut Lines<'a>,
-    arena: &'a Arena,
-    mut each: impl FnMut(MutSectionCtx) -> Result<(), Error>,
-) -> Result<(), Error> {
-    let mut index = 0;
-    let mut first_index = 0;
-    while let Some(line) = lines.get(index) {
-        match line {
-            Line::Section { .. } => (),
-            Line::Empty => {
-                index += 1;
-                first_index = index;
-                continue;
-            }
-            _ if line.is_in_section() => {
-                index += 1;
-                first_index = index;
-                continue;
-            }
-            _ => {
-                index += 1;
-                continue;
-            }
-        };
-        let mut retain = true;
-        each(MutSectionCtx {
-            lines,
-            arena,
-            index,
-            retain: &mut retain,
-        })?;
-        if retain {
-            // Retain the section and move on
-            index += 1;
-        } else {
-            // Remove the section
-            let mut last_index = index + 1;
-            for i in last_index..lines.len() {
-                if matches!(lines[i], Line::Section { .. }) {
-                    break;
-                }
-                if lines[i].is_in_section() {
-                    last_index = i;
-                }
-            }
-            lines.splice(first_index..=last_index, []);
-            index = first_index;
-        }
-    }
-    Ok(())
-}
-
 pub type Lines<'a> = Vec<Line<'a>>;
 pub type Arena = typed_arena::Arena<String>;
 
-pub struct MutSectionCtx<'a, 'l> {
-    pub lines: &'l mut Lines<'a>,
-    pub arena: &'a Arena,
-    pub index: usize,
-    retain: &'l mut bool,
+pub struct Sections<'a> {
+    lines: &'a Lines<'a>,
+    index: usize,
+    started: bool,
 }
 
-impl<'a> MutSectionCtx<'a, '_> {
+impl<'a> Sections<'a> {
     pub fn ty(&self) -> Cow<str> {
+        if !self.started {
+            panic!("call step at least once");
+        }
         if let Line::Section { ty, .. } = &self.lines[self.index] {
             return ty.as_str();
         }
@@ -155,6 +116,9 @@ impl<'a> MutSectionCtx<'a, '_> {
     }
 
     pub fn name(&self) -> Option<Cow<str>> {
+        if !self.started {
+            panic!("call step at least once");
+        }
         if let Line::Section { name, .. } = &self.lines[self.index] {
             return name.as_ref().map(|n| n.as_str());
         }
@@ -162,19 +126,155 @@ impl<'a> MutSectionCtx<'a, '_> {
     }
 
     pub fn get<S: UciSection<'a>>(&self) -> Result<S, Error> {
+        if !self.started {
+            panic!("call step at least once");
+        }
+        S::read(self.lines, self.index)
+    }
+
+    pub fn step(&mut self) -> bool {
+        if self.started {
+            self.index += 1;
+        }
+
+        self.started = true;
+        while let Some(line) = self.lines.get(self.index) {
+            match line {
+                Line::Section { .. } => {
+                    return true;
+                }
+                _ => {
+                    self.index += 1;
+                    continue;
+                }
+            };
+        }
+
+        // Got to the end
+        self.started = false;
+        false
+    }
+}
+
+pub struct SectionsMut<'l, 'a> {
+    lines: &'l mut Lines<'a>,
+    index: usize,
+    arena: &'a Arena,
+    section_start: Option<usize>,
+    retain: bool,
+}
+
+impl<'a> SectionsMut<'_, 'a> {
+    pub fn ty(&self) -> Cow<str> {
+        if self.section_start.is_none() {
+            panic!("call step at least once");
+        }
+        if let Line::Section { ty, .. } = &self.lines[self.index] {
+            return ty.as_str();
+        }
+        panic!("section ctx not at a section")
+    }
+
+    pub fn name(&self) -> Option<Cow<str>> {
+        if self.section_start.is_none() {
+            panic!("call step at least once");
+        }
+        if let Line::Section { name, .. } = &self.lines[self.index] {
+            return name.as_ref().map(|n| n.as_str());
+        }
+        panic!("section ctx not at a section")
+    }
+
+    pub fn get<S: UciSection<'a>>(&self) -> Result<S, Error> {
+        if self.section_start.is_none() {
+            panic!("call step at least once");
+        }
+        if self.section_start.is_none() {
+            panic!("call step at least once");
+        }
         S::read(self.lines, self.index)
     }
 
     pub fn set<S: UciSection<'a>>(&mut self, section: S) -> Result<(), Error> {
+        if self.section_start.is_none() {
+            panic!("call step at least once");
+        }
         section.write(self.lines, self.arena, self.index)
     }
 
+    pub fn push<S: UciSection<'a>>(
+        &mut self,
+        section: S,
+        name: Option<impl Display>,
+    ) -> Result<(), Error> {
+        section.append(
+            self.lines,
+            self.arena,
+            name.map(|n| self.arena.alloc(n.to_string()).as_str()),
+        )
+    }
+
     pub fn remove(&mut self) {
-        *self.retain = true;
+        self.set_retain(false);
     }
 
     pub fn set_retain(&mut self, retain: bool) {
-        *self.retain = retain;
+        if self.section_start.is_none() {
+            panic!("call step at least once");
+        }
+        self.retain = retain;
+    }
+
+    pub fn step(&mut self) -> bool {
+        if let Some(first_index) = self.section_start {
+            if self.retain {
+                // Retain the section and move on
+                self.index += 1;
+            } else {
+                // Remove the section
+                let mut last_index = self.index + 1;
+                let search_range = last_index..self.lines.len();
+                for i in search_range {
+                    if matches!(self.lines[i], Line::Section { .. }) {
+                        break;
+                    }
+                    if self.lines[i].is_in_section() {
+                        last_index = i;
+                    }
+                }
+                self.lines.splice(first_index..=last_index, []);
+                self.index = first_index;
+            }
+        }
+
+        let mut first_index = self.index;
+        while let Some(line) = self.lines.get(self.index) {
+            match line {
+                Line::Section { .. } => {
+                    self.section_start = Some(first_index);
+                    self.retain = true;
+                    return true;
+                }
+                Line::Empty => {
+                    self.index += 1;
+                    first_index = self.index;
+                    continue;
+                }
+                _ if line.is_in_section() => {
+                    self.index += 1;
+                    first_index = self.index;
+                    continue;
+                }
+                _ => {
+                    self.index += 1;
+                    continue;
+                }
+            };
+        }
+
+        // Got to the end. If called a second time, check the same index.
+        self.section_start = None;
+        false
     }
 }
 
@@ -333,6 +433,12 @@ impl<'a> Token<'a> {
     }
 }
 
+impl PartialEq<str> for Token<'_> {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
 impl fmt::Display for Token<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -371,8 +477,11 @@ config bar
         many: Vec<i32>,
     }
 
-    let lines = parse_config_string(original).unwrap();
-    let parsed = Bar::read(&lines, 1).unwrap();
+    let parsed: Bar = parse_config_string(original, |mut ctx| {
+        assert!(ctx.step());
+        ctx.get()
+    })
+    .unwrap();
 
     println!(
         "===Original==={original}===Parsed===\n{parsed:#?}\n===Expected===\n{expected:#?}\n====="
@@ -409,14 +518,16 @@ config bar appended
         many: Vec<i32>,
     }
 
-    let edited = rewrite_config_string(original.to_string(), |lines, arena| {
-        Bar {
-            always: 0,
-            yes: Some(1),
-            no: None,
-            many: vec![2, 3, 4],
-        }
-        .append(lines, arena, Some("appended"))
+    let edited = rewrite_config_string(original.to_string(), |mut ctx| {
+        ctx.push(
+            Bar {
+                always: 0,
+                yes: Some(1),
+                no: None,
+                many: vec![2, 3, 4],
+            },
+            Some("appended"),
+        )
     })
     .unwrap();
 
@@ -485,14 +596,16 @@ config other
         few: Vec<i32>,
     }
 
-    let edited = rewrite_sections_string(original.to_string(), |mut ctx| {
-        let _ = ctx.set(Bar {
-            always: 0,
-            yes: Some(1),
-            no: None,
-            many: vec![2, 3, 4],
-            few: vec![5],
-        });
+    let edited = rewrite_config_string(original.to_string(), |mut ctx| {
+        while ctx.step() {
+            let _ = ctx.set(Bar {
+                always: 0,
+                yes: Some(1),
+                no: None,
+                many: vec![2, 3, 4],
+                few: vec![5],
+            });
+        }
         Ok(())
     })
     .unwrap();
@@ -539,8 +652,10 @@ config retain
     # comment 4
 ";
 
-    let edited = rewrite_sections_string(original.to_string(), |mut ctx| {
-        ctx.set_retain(ctx.ty() == "retain");
+    let edited = rewrite_config_string(original.to_string(), |mut ctx| {
+        while ctx.step() {
+            ctx.set_retain(ctx.ty() == "retain");
+        }
         Ok(())
     })
     .unwrap();

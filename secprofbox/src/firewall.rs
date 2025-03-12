@@ -1,7 +1,7 @@
-use crate::state::{Connection, ConnectionId, LanAccess, SecProfile, State, WatchState};
+use crate::state::{Config, Connection, ConnectionId, LanAccess, SecProfile, State, WatchState};
 use color_eyre::eyre::Error;
 use macaddr::MacAddr;
-use std::{future::Future, net::IpAddr};
+use std::{fmt::Write, future::Future, net::IpAddr};
 use tokio::{process::Command, task::JoinSet};
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
@@ -221,4 +221,71 @@ pub async fn maintain_iptables(state: WatchState) -> Result<(), Error> {
         Ok(())
     })
     .await
+}
+
+pub async fn write_basic_firewall_config(_cfg: &Config) -> Result<(), Error> {
+    use uciedit::openwrt::{FirewallRule, FirewallTarget::REJECT};
+    use uciedit::rewrite_config;
+
+    const LAN_RULE_NAME: &str = "reject lan->lan unless accepted by start-wrt secprofs";
+    const WAN_RULE_NAME: &str = "reject lan->wan unless accepted by start-wrt secprofs";
+
+    rewrite_config("/etc/config/firewall", |mut ctx| {
+        let mut found_lan_rule = false;
+        let mut found_wan_rule = false;
+        while ctx.step() {
+            if ctx.ty() != "rule" {
+                continue;
+            }
+            let Ok(mut rule) = ctx.get::<FirewallRule>() else {
+                continue;
+            };
+            if rule.name == LAN_RULE_NAME {
+                found_lan_rule = true;
+                rule.src.replace_range(.., "lan");
+                rule.src.replace_range(.., "lan");
+                rule.target = REJECT;
+                ctx.set(rule)?;
+            } else if rule.name == WAN_RULE_NAME {
+                found_wan_rule = true;
+                rule.src.replace_range(.., "lan");
+                rule.src.replace_range(.., "wan");
+                rule.target = REJECT;
+                ctx.set(rule)?;
+            }
+        }
+        if !found_lan_rule {
+            ctx.push(
+                FirewallRule {
+                    name: LAN_RULE_NAME.into(),
+                    src: "lan".into(),
+                    dest: "lan".into(),
+                    target: REJECT,
+                    ..Default::default()
+                },
+                None::<String>,
+            )?;
+        }
+        if !found_wan_rule {
+            ctx.push(
+                FirewallRule {
+                    name: WAN_RULE_NAME.into(),
+                    src: "lan".into(),
+                    dest: "wan".into(),
+                    target: REJECT,
+                    ..Default::default()
+                },
+                None::<String>,
+            )?;
+        }
+        Ok(())
+    })?;
+
+    Command::new("/etc/init.d/firewall")
+        .arg("reload")
+        .spawn()?
+        .wait()
+        .await?;
+
+    Ok(())
 }

@@ -1,7 +1,7 @@
 use color_eyre::eyre::Error;
 use secprofbox::firewall::produce_rule_changes;
 use secprofbox::monitor::{monitor_addrwatch, monitor_wpa};
-use secprofbox::state::{LanAccess, SecProfile, State};
+use secprofbox::state::{KeyId, LanAccess, SecProfile, State};
 use secprofbox::{init_logging, state::WatchState};
 use tokio::task::JoinSet;
 use tracing::error;
@@ -51,18 +51,27 @@ pub async fn main() {
             wan: true,
         },
     );
-    state
-        .config
-        .keyid_to_profile
-        .insert("guest".into(), "guest".into());
-    state
-        .config
-        .keyid_to_profile
-        .insert("foo".into(), "foo".into());
-    state
-        .config
-        .keyid_to_profile
-        .insert("default".into(), "default".into());
+    state.config.keyids.insert(
+        "guest".into(),
+        KeyId {
+            profile: "guest".into(),
+            password: "".into(),
+        },
+    );
+    state.config.keyids.insert(
+        "foo".into(),
+        KeyId {
+            profile: "foo".into(),
+            password: "".into(),
+        },
+    );
+    state.config.keyids.insert(
+        "default".into(),
+        KeyId {
+            profile: "default".into(),
+            password: "".into(),
+        },
+    );
     let state = WatchState::new(state);
 
     //tasks.spawn(log_state(state.clone()));
