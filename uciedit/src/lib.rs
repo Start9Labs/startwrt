@@ -70,26 +70,14 @@ pub fn rewrite_config_string(
 
 pub fn rewrite_sections(
     path: impl AsRef<Path>,
-    each: impl for<'a> FnMut(
-        &mut Lines<'a>,
-        &'a Arena,
-        usize,
-        &str,
-        Option<&str>,
-    ) -> Result<bool, Error>,
+    each: impl for<'a> FnMut(MutSectionCtx) -> Result<bool, Error>,
 ) -> Result<(), Error> {
     rewrite_config(path, |lines, arena| each_section(lines, arena, each))
 }
 
 pub fn rewrite_sections_string(
     config: String,
-    each: impl for<'a> FnMut(
-        &mut Lines<'a>,
-        &'a Arena,
-        usize,
-        &str,
-        Option<&str>,
-    ) -> Result<bool, Error>,
+    each: impl for<'a> FnMut(MutSectionCtx) -> Result<bool, Error>,
 ) -> Result<String, Error> {
     rewrite_config_string(config, |lines, arena| each_section(lines, arena, each))
 }
@@ -97,20 +85,33 @@ pub fn rewrite_sections_string(
 pub fn each_section<'a>(
     lines: &mut Lines<'a>,
     arena: &'a Arena,
-    mut each: impl FnMut(&mut Lines<'a>, &'a Arena, usize, &str, Option<&str>) -> Result<bool, Error>,
+    mut each: impl FnMut(MutSectionCtx) -> Result<bool, Error>,
 ) -> Result<(), Error> {
     let mut index = 0;
+    let mut first_index = 0;
     while let Some(line) = lines.get(index) {
-        let (ty, name) = if let Line::Section { ty, name } = line {
-            (
-                ty.as_str().into_owned(),
-                name.map(|n| n.as_str().into_owned()),
-            )
-        } else {
-            index += 1;
-            continue;
+        match line {
+            Line::Section { .. } => (),
+            Line::Empty => {
+                index += 1;
+                first_index = index;
+                continue;
+            }
+            _ if line.is_in_section() => {
+                index += 1;
+                first_index = index;
+                continue;
+            }
+            _ => {
+                index += 1;
+                continue;
+            }
         };
-        if each(lines, arena, index, &ty, name.as_deref())? {
+        if each(MutSectionCtx {
+            lines,
+            arena,
+            index,
+        })? {
             // Retain the section and move on
             index += 1;
         } else {
@@ -124,7 +125,8 @@ pub fn each_section<'a>(
                     last_index = i;
                 }
             }
-            lines.splice(index..=last_index, []);
+            lines.splice(first_index..=last_index, []);
+            index = first_index;
         }
     }
     Ok(())
@@ -132,6 +134,28 @@ pub fn each_section<'a>(
 
 pub type Lines<'a> = Vec<Line<'a>>;
 pub type Arena = typed_arena::Arena<String>;
+
+pub struct MutSectionCtx<'a, 'l> {
+    pub lines: &'l mut Lines<'a>,
+    pub arena: &'a Arena,
+    pub index: usize,
+}
+
+impl MutSectionCtx<'_, '_> {
+    pub fn ty(&self) -> Cow<str> {
+        if let Line::Section { ty, .. } = &self.lines[self.index] {
+            return ty.as_str();
+        }
+        panic!("section ctx not at a section")
+    }
+
+    pub fn name(&self) -> Option<Cow<str>> {
+        if let Line::Section { name, .. } = &self.lines[self.index] {
+            return name.as_ref().map(|n| n.as_str());
+        }
+        panic!("section ctx not at a section")
+    }
+}
 
 pub trait UciSection<'a>: Sized {
     fn read(lines: &Lines<'a>, index: usize) -> Result<Self, Error>;
@@ -402,6 +426,8 @@ config bar named
     option ignored 6
 
 # bottom comment
+config other
+    option something here
 ";
 
     let expected = r"
@@ -425,6 +451,8 @@ config bar named
     list many 4
 
 # bottom comment
+config other
+    option something here
 ";
 
     #[derive(UciSection)]
@@ -436,15 +464,16 @@ config bar named
         few: Vec<i32>,
     }
 
-    let edited = rewrite_config_string(original.to_string(), |lines, arena| {
-        Bar {
+    let edited = rewrite_sections_string(original.to_string(), |ctx| {
+        let _ = Bar {
             always: 0,
             yes: Some(1),
             no: None,
             many: vec![2, 3, 4],
             few: vec![5],
         }
-        .write(lines, arena, 2)
+        .write(ctx.lines, ctx.arena, ctx.index);
+        Ok(true)
     })
     .unwrap();
 
@@ -482,9 +511,7 @@ config retain
     option foo bar
     # comment 1
 
-# section 2
 
-# section 3
 
 # section 4
 config retain
@@ -493,10 +520,7 @@ config retain
 ";
 
     let edited =
-        rewrite_sections_string(original.to_string(), |_lines, _arena, _index, ty, _name| {
-            Ok(ty == "retain")
-        })
-        .unwrap();
+        rewrite_sections_string(original.to_string(), |ctx| Ok(ctx.ty() == "retain")).unwrap();
 
     println!("===Original==={original}===Edited==={edited}===Expected==={expected}=====");
     assert_eq!(edited.replace("\t", "    "), expected);
