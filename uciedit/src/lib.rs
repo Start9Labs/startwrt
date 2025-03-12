@@ -6,61 +6,80 @@ use std::{borrow::Cow, fs::File, path::Path};
 use std::{fmt, fs};
 pub use uciedit_macros::UciSection;
 
-extern crate self as uciedit;
-
-#[derive(Inpt, Clone, Copy)]
-pub enum Token<'a> {
-    Q(Quoted<&'a str>),
-    Sq(SingleQuoted<&'a str>),
-    W(Word<&'a str>),
+pub fn parse_config<V>(
+    path: impl AsRef<Path>,
+    with: impl FnOnce(Lines<'_>) -> Result<V, Error>,
+) -> Result<V, Error> {
+    let text = fs::read_to_string(path)?;
+    with(parse_config_string(&text)?)
 }
 
-impl<'a> Token<'a> {
-    pub fn as_str(&self) -> Cow<str> {
-        // TODO: inpt doesn't currently do unescaping
-        match self {
-            Token::Q(x) => x.unescape(),
-            Token::Sq(x) => x.unescape(),
-            Token::W(x) => Cow::Borrowed(x.inner),
-        }
-    }
-
-    pub fn from_display(s: &impl fmt::Display, arena: &'a Arena) -> Self {
-        Self::from_string(s.to_string(), arena)
-    }
-
-    pub fn from_string(s: String, arena: &'a Arena) -> Self {
-        if s.contains(|c: char| c.is_whitespace()) {
-            let q = arena.alloc(format!("{:?}", s));
-            Token::Q(Quoted {
-                inner: &q[1..q.len() - 1],
-            })
-        } else {
-            let s = arena.alloc(s);
-            Token::W(Word { inner: s })
-        }
-    }
-
-    pub fn from_str(s: &'a str, arena: &'a Arena) -> Self {
-        if s.contains(|c: char| c.is_whitespace()) {
-            let q = arena.alloc(format!("{:?}", s));
-            Token::Q(Quoted {
-                inner: &q[1..q.len() - 1],
-            })
-        } else {
-            Token::W(Word { inner: s })
-        }
-    }
+pub fn parse_config_string(config: &str) -> Result<Lines<'_>, Error> {
+    config.lines().map(Line::parse).collect()
 }
 
-impl fmt::Display for Token<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Token::Q(quoted) => write!(f, "\"{}\"'", quoted.inner),
-            Token::Sq(single_quoted) => write!(f, "'{}'", single_quoted.inner),
-            Token::W(word) => write!(f, "{}", word.inner),
-        }
+/// TODO: async version?
+pub fn rewrite_config<V>(
+    path: impl AsRef<Path>,
+    with: impl for<'a> FnOnce(&mut Lines<'a>, &'a Arena) -> Result<V, Error>,
+) -> Result<V, Error> {
+    use std::io::Write;
+
+    use fd_lock_rs::{FdLock, LockType};
+    use std::io::BufReader;
+    let file = File::options()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(path)?;
+    let mut locked = FdLock::lock(file, LockType::Exclusive, true)?;
+    let mut lines = Vec::new();
+    let arena = Arena::new();
+    for line in BufReader::new(&mut *locked).lines() {
+        let line = arena.alloc(line?);
+        lines.push(Line::parse(line)?);
     }
+    let v = with(&mut lines, &arena)?;
+    locked.set_len(0)?;
+    let mut writer = BufWriter::new(&mut *locked);
+    for line in lines {
+        write!(writer, "{}", line)?;
+    }
+    Ok(v)
+}
+
+pub fn rewrite_config_string(
+    config: String,
+    with: impl for<'a> FnOnce(&mut Lines<'a>, &'a Arena) -> Result<(), Error>,
+) -> Result<String, Error> {
+    use std::fmt::Write;
+
+    let mut lines = Vec::new();
+    let arena = Arena::new();
+    for line in arena.alloc(config).lines() {
+        lines.push(Line::parse(line)?);
+    }
+    with(&mut lines, &arena)?;
+    let mut writer = String::new();
+    for line in lines {
+        write!(writer, "{}", line)?;
+    }
+    Ok(writer)
+}
+
+pub type Lines<'a> = Vec<Line<'a>>;
+pub type Arena = typed_arena::Arena<String>;
+
+pub trait UciSection<'a>: Sized {
+    fn read(lines: &Lines<'a>, index: usize) -> Result<Self, Error>;
+    fn write(&self, lines: &mut Lines<'a>, arena: &'a Arena, index: usize) -> Result<(), Error>;
+    fn append(
+        &self,
+        lines: &mut Lines<'a>,
+        arena: &'a Arena,
+        name: Option<&'a str>,
+    ) -> Result<(), Error>;
 }
 
 pub enum Line<'a> {
@@ -145,81 +164,62 @@ impl<'a> Line<'a> {
     }
 }
 
-pub type Lines<'a> = Vec<Line<'a>>;
-pub type Arena = typed_arena::Arena<String>;
-
-pub trait UciSection<'a>: Sized {
-    fn read(lines: &Lines<'a>, index: usize) -> Result<Self, Error>;
-    fn write(&self, lines: &mut Lines<'a>, arena: &'a Arena, index: usize) -> Result<(), Error>;
-    fn append(
-        &self,
-        lines: &mut Lines<'a>,
-        arena: &'a Arena,
-        name: Option<&'a str>,
-    ) -> Result<(), Error>;
+#[derive(Inpt, Clone, Copy)]
+pub enum Token<'a> {
+    Q(Quoted<&'a str>),
+    Sq(SingleQuoted<&'a str>),
+    W(Word<&'a str>),
 }
 
-pub fn parse_config<V>(
-    path: impl AsRef<Path>,
-    with: impl FnOnce(Lines<'_>) -> Result<V, Error>,
-) -> Result<V, Error> {
-    let text = fs::read_to_string(path)?;
-    with(parse_config_string(&text)?)
-}
-
-pub fn parse_config_string(config: &str) -> Result<Lines<'_>, Error> {
-    config.lines().map(Line::parse).collect()
-}
-
-/// TODO: async version?
-pub fn rewrite_config<V>(
-    path: impl AsRef<Path>,
-    with: impl for<'a> FnOnce(&mut Lines<'a>, &'a Arena) -> Result<V, Error>,
-) -> Result<V, Error> {
-    use std::io::Write;
-
-    use fd_lock_rs::{FdLock, LockType};
-    use std::io::BufReader;
-    let file = File::options()
-        .create(true)
-        .read(true)
-        .write(true)
-        .truncate(false)
-        .open(path)?;
-    let mut locked = FdLock::lock(file, LockType::Exclusive, true)?;
-    let mut lines = Vec::new();
-    let arena = Arena::new();
-    for line in BufReader::new(&mut *locked).lines() {
-        let line = arena.alloc(line?);
-        lines.push(Line::parse(line)?);
+impl<'a> Token<'a> {
+    pub fn as_str(&self) -> Cow<str> {
+        // TODO: inpt doesn't currently do unescaping
+        match self {
+            Token::Q(x) => x.unescape(),
+            Token::Sq(x) => x.unescape(),
+            Token::W(x) => Cow::Borrowed(x.inner),
+        }
     }
-    let v = with(&mut lines, &arena)?;
-    locked.set_len(0)?;
-    let mut writer = BufWriter::new(&mut *locked);
-    for line in lines {
-        write!(writer, "{}", line)?;
+
+    pub fn from_display(s: &impl fmt::Display, arena: &'a Arena) -> Self {
+        Self::from_string(s.to_string(), arena)
     }
-    Ok(v)
+
+    pub fn from_string(s: String, arena: &'a Arena) -> Self {
+        if s.contains(|c: char| c.is_whitespace()) {
+            let q = arena.alloc(format!("{:?}", s));
+            Token::Q(Quoted {
+                inner: &q[1..q.len() - 1],
+            })
+        } else {
+            let s = arena.alloc(s);
+            Token::W(Word { inner: s })
+        }
+    }
+
+    pub fn from_str(s: &'a str, arena: &'a Arena) -> Self {
+        if s.contains(|c: char| c.is_whitespace()) {
+            let q = arena.alloc(format!("{:?}", s));
+            Token::Q(Quoted {
+                inner: &q[1..q.len() - 1],
+            })
+        } else {
+            Token::W(Word { inner: s })
+        }
+    }
 }
 
-pub fn rewrite_config_string(
-    config: String,
-    with: impl for<'a> FnOnce(&mut Lines<'a>, &'a Arena) -> Result<(), Error>,
-) -> Result<String, Error> {
-    use std::fmt::Write;
-
-    let mut lines = Vec::new();
-    let arena = Arena::new();
-    for line in arena.alloc(config).lines() {
-        lines.push(Line::parse(line)?);
+impl fmt::Display for Token<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Token::Q(quoted) => write!(f, "\"{}\"'", quoted.inner),
+            Token::Sq(single_quoted) => write!(f, "'{}'", single_quoted.inner),
+            Token::W(word) => write!(f, "{}", word.inner),
+        }
     }
-    with(&mut lines, &arena)?;
-    let mut writer = String::new();
-    for line in lines {
-        write!(writer, "{}", line)?;
-    }
-    Ok(writer)
 }
+
+extern crate self as uciedit; // for proc-macros in the tests below
 
 #[test]
 fn test_read_section() {
