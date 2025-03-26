@@ -1,10 +1,10 @@
 use eyre::Context;
 pub use eyre::{bail, eyre as error, Error};
 pub use inpt::inpt;
-use inpt::split::{Quoted, SingleQuoted, Word};
+use inpt::split::{Quoted, SingleQuoted, Spaced};
 use inpt::{inpt_step, Inpt, InptStep};
 use std::fmt::Display;
-use std::io::{BufRead, BufWriter};
+use std::io::{BufRead, BufWriter, Seek};
 use std::{borrow::Cow, fs::File, path::Path};
 use std::{fmt, fs};
 pub use uciedit_macros::UciSection;
@@ -63,6 +63,7 @@ pub fn rewrite_config<V>(
         retain: true,
     })?;
     locked.set_len(0)?;
+    locked.seek(std::io::SeekFrom::Start(0))?;
     let mut writer = BufWriter::new(&mut *locked);
     for line in lines {
         write!(writer, "{}", line)?;
@@ -391,7 +392,7 @@ impl<'a> Line<'a> {
 pub enum Token<'a> {
     Q(Quoted<&'a str>),
     Sq(SingleQuoted<&'a str>),
-    W(Word<&'a str>),
+    W(Spaced<&'a str>),
 }
 
 impl<'a> Token<'a> {
@@ -416,7 +417,7 @@ impl<'a> Token<'a> {
             })
         } else {
             let s = arena.alloc(s);
-            Token::W(Word { inner: s })
+            Token::W(Spaced { inner: s })
         }
     }
 
@@ -427,7 +428,7 @@ impl<'a> Token<'a> {
                 inner: &q[1..q.len() - 1],
             })
         } else {
-            Token::W(Word { inner: s })
+            Token::W(Spaced { inner: s })
         }
     }
 }
@@ -441,7 +442,7 @@ impl PartialEq<str> for Token<'_> {
 impl fmt::Display for Token<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Token::Q(quoted) => write!(f, "\"{}\"'", quoted.inner),
+            Token::Q(quoted) => write!(f, "\"{}\"", quoted.inner),
             Token::Sq(single_quoted) => write!(f, "'{}'", single_quoted.inner),
             Token::W(word) => write!(f, "{}", word.inner),
         }

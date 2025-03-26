@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
 use color_eyre::eyre::Error;
 use secprofbox::firewall::produce_rule_changes;
 use secprofbox::monitor::{monitor_addrwatch, monitor_wpa};
-use secprofbox::state::{KeyId, LanAccess, SecProfile, State};
+use secprofbox::state::{load_config, Config, KeyId, LanAccess, SecProfile, State};
 use secprofbox::{init_logging, state::WatchState};
 use tokio::task::JoinSet;
 use tracing::error;
@@ -30,48 +32,13 @@ pub async fn main() {
     let _logging = init_logging("secprofdebug");
     let mut tasks = JoinSet::new();
     let mut state = State::default();
-    state.config.profiles.insert(
-        "default".into(),
-        SecProfile {
-            lan: LanAccess::AllDevices,
-            wan: true,
-        },
-    );
-    state.config.profiles.insert(
-        "guest".into(),
-        SecProfile {
-            lan: LanAccess::NoDevices,
-            wan: true,
-        },
-    );
-    state.config.profiles.insert(
-        "foo".into(),
-        SecProfile {
-            lan: LanAccess::OtherProfile(vec!["foo".into()]),
-            wan: true,
-        },
-    );
-    state.config.keyids.insert(
-        "guest".into(),
-        KeyId {
-            profile: "guest".into(),
-            password: "".into(),
-        },
-    );
-    state.config.keyids.insert(
-        "foo".into(),
-        KeyId {
-            profile: "foo".into(),
-            password: "".into(),
-        },
-    );
-    state.config.keyids.insert(
-        "default".into(),
-        KeyId {
-            profile: "default".into(),
-            password: "".into(),
-        },
-    );
+    match load_config() {
+        Ok(cfg) => state.config = Arc::new(cfg),
+        Err(err) => {
+            println!("{:?}", err);
+            return;
+        }
+    }
     let state = WatchState::new(state);
 
     //tasks.spawn(log_state(state.clone()));

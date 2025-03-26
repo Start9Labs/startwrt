@@ -1,12 +1,16 @@
 use color_eyre::eyre::{bail, eyre, Context, Error};
-use futures::try_join;
+use futures::future::{try_select, Either};
+use futures::{pin_mut, try_join, FutureExt};
 use inpt::split::{Line, Spaced};
 use inpt::{inpt, Inpt};
 use macaddr::MacAddr;
+use std::mem::replace;
 use std::net::IpAddr;
 use std::path::Path;
 use std::process::Stdio;
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::time::sleep;
 use tracing::{error, info};
 
 use crate::state::{ConnectionId, WatchState};
@@ -32,6 +36,8 @@ enum WpaEvent<'s> {
         #[inpt(after)]
         _kvs: Vec<Spaced<WpaEventKv<'s>>>,
     },
+    #[inpt(regex = r"<\d>CTRL-EVENT-TERMINATING")]
+    Terminating,
 }
 
 #[derive(Debug, Inpt)]
@@ -82,6 +88,7 @@ async fn monitor_wpa_events(
                 // technically a race condition if we observe disconnect,connect,addr as addr,disconnect,connnect
                 // but the reconnect would have to happen very fast
             }
+            Ok(WpaEvent::Terminating) => break,
             Err(_) => (),
         }
     }
@@ -127,17 +134,31 @@ async fn monitor_wpa_initial(
 }
 
 pub async fn monitor_wpa(state: WatchState, interface: String) -> Result<(), Error> {
-    let mut ctrl = WpaCtrl::open(Path::new("/var/run/hostapd").join(&interface))
-        .await
-        .context("openning hostapd ctrl socket")?;
-    match ctrl.request("ATTACH").await?.as_str() {
-        "OK" => info!("monitoring wifi interface={interface:?}"),
-        err => bail!("ATTACH returned {}", err),
+    loop {
+        let mut ctrl = Err(eyre!("no retries"));
+        for _ in 0..10 {
+            ctrl = WpaCtrl::open(Path::new("/var/run/hostapd").join(&interface))
+                .await
+                .context("openning hostapd ctrl socket");
+            if ctrl.is_ok() {
+                break;
+            }
+            sleep(Duration::from_millis(500)).await;
+        }
+        let mut ctrl = ctrl?;
+        match ctrl.request("ATTACH").await?.as_str() {
+            "OK" => info!("monitoring wifi interface={interface:?}"),
+            err => bail!("ATTACH returned {}", err),
+        }
+        let monitor = monitor_wpa_events(state.clone(), interface.clone(), ctrl.subscribe()).fuse();
+        pin_mut!(monitor);
+        let initial = monitor_wpa_initial(state.clone(), interface.clone(), &mut ctrl).fuse();
+        pin_mut!(initial);
+        futures::select! {
+            res = monitor => res?,
+            res = initial => res?,
+        };
     }
-    let monitor = monitor_wpa_events(state.clone(), interface.clone(), ctrl.subscribe());
-    let initial = monitor_wpa_initial(state, interface, &mut ctrl);
-    try_join!(monitor, initial)?;
-    Ok(())
 }
 
 #[derive(Debug, Inpt)]

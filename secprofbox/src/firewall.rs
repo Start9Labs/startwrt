@@ -143,8 +143,8 @@ impl RuleChange {
         };
         c.arg(src_zone.iptables_zone("forward"));
         if let Some(src_mac) = src_mac {
-            c.arg("--mac-source");
-            c.arg(src_mac.to_string());
+            //c.arg("--mac-source");
+            //c.arg(src_mac.to_string());
         }
         if let Some(src_ip) = src_ip {
             c.arg("-s");
@@ -217,22 +217,29 @@ where
 
 pub async fn maintain_iptables(state: WatchState) -> Result<(), Error> {
     produce_rule_changes(state, |change| async move {
-        let _status = change.iptables().spawn()?.wait().await?;
+        let mut command = change.iptables();
+        dbg!(&command);
+        let _status = command.spawn()?.wait().await?;
         Ok(())
     })
     .await
 }
 
 pub async fn write_basic_firewall_config(_cfg: &Config) -> Result<(), Error> {
-    use uciedit::openwrt::{FirewallRule, FirewallTarget::REJECT};
+    use uciedit::openwrt::FirewallRule;
+    use uciedit::openwrt::FirewallTarget::{ACCEPT, REJECT};
     use uciedit::rewrite_config;
 
     const LAN_RULE_NAME: &str = "reject lan->lan unless accepted by start-wrt secprofs";
     const WAN_RULE_NAME: &str = "reject lan->wan unless accepted by start-wrt secprofs";
+    const LOCALHOST_LAN_RULE_NAME: &str = "accept lan->localhost to allow admin access";
+    const LOCALHOST_WAN_RULE_NAME: &str = "accept localhost->wan to allow admin access";
 
     rewrite_config("/etc/config/firewall", |mut ctx| {
         let mut found_lan_rule = false;
         let mut found_wan_rule = false;
+        let mut found_localhost_lan_rule = false;
+        let mut found_localhost_wan_rule = false;
         while ctx.step() {
             if ctx.ty() != "rule" {
                 continue;
@@ -242,15 +249,19 @@ pub async fn write_basic_firewall_config(_cfg: &Config) -> Result<(), Error> {
             };
             if rule.name == LAN_RULE_NAME {
                 found_lan_rule = true;
-                rule.src.replace_range(.., "lan");
-                rule.src.replace_range(.., "lan");
                 rule.target = REJECT;
                 ctx.set(rule)?;
             } else if rule.name == WAN_RULE_NAME {
                 found_wan_rule = true;
-                rule.src.replace_range(.., "lan");
-                rule.src.replace_range(.., "wan");
                 rule.target = REJECT;
+                ctx.set(rule)?;
+            } else if rule.name == LOCALHOST_LAN_RULE_NAME {
+                found_localhost_lan_rule = true;
+                rule.target = ACCEPT;
+                ctx.set(rule)?;
+            } else if rule.name == LOCALHOST_WAN_RULE_NAME {
+                found_localhost_wan_rule = true;
+                rule.target = ACCEPT;
                 ctx.set(rule)?;
             }
         }
@@ -277,6 +288,22 @@ pub async fn write_basic_firewall_config(_cfg: &Config) -> Result<(), Error> {
                 },
                 None::<String>,
             )?;
+        }
+        if !found_localhost_lan_rule {
+            ctx.push(
+                FirewallRule {
+                    name: LOCALHOST_LAN_RULE_NAME.into(),
+                    src: "lan".into(),
+                    dest: "lan".into(),
+                    dest_ip: Some("192.168.1.1".into()),
+                    target: ACCEPT,
+                    ..Default::default()
+                },
+                None::<String>,
+            )?;
+        }
+        if !found_localhost_wan_rule {
+            // TODO: what should this be?
         }
         Ok(())
     })?;
